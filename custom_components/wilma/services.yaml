@@ -1,0 +1,7 @@
+refresh:
+  name: Refresh
+  description: Force a refresh of Wilma data.
+  target:
+    entity:
+      domain: sensor
+      integration: wilma

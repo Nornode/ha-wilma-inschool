@@ -1,0 +1,73 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Wilma",
+        "description": "Set up Wilma integration to access your messages.",
+        "data": {
+          "server_url": "Wilma Server URL (e.g. https://turku.inschool.fi)",
+          "username": "Username",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Wilma",
+      "invalid_auth": "Invalid username or password",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This Wilma account is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Wilma options",
+        "data": {
+          "scan_interval_minutes": "Polling interval (minutes)",
+          "only_unread": "Fetch only unread messages",
+          "no_message_content_fetch_limit": "Disable full-content fetch limit"
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "problem": {
+        "name": "Problem"
+      }
+    },
+    "sensor": {
+      "latest_message": {
+        "name": "Latest Message"
+      },
+      "unread_count": {
+        "name": "Unread Messages"
+      },
+      "latest_bulletin": {
+        "name": "Latest Bulletin"
+      },
+      "unread_bulletin_count": {
+        "name": "Unread Bulletins"
+      },
+      "last_update": {
+        "name": "Last Update"
+      },
+      "next_lesson": {
+        "name": "Next Lesson"
+      },
+      "attendance_count": {
+        "name": "Attendance Marks"
+      },
+      "latest_attendance": {
+        "name": "Latest Attendance Mark"
+      }
+    },
+    "calendar": {
+      "schedule": {
+        "name": "Schedule"
+      }
+    }
+  }
+}
