@@ -1,8 +1,8 @@
 # Wilma for Home Assistant
 
-> **Disclaimer:** This is an independent, community-developed project and is not affiliated with, endorsed by, or in any way connected to [Visma](https://www.visma.com/) or [Inschool](https://www.vismasolutions.com/fi/produkter/wilma/). _Wilma_ and _Inschool_ are products of Visma Solutions Oy. Use of their service is subject to their own [terms of use](https://help.wilma.fi/en/terms-of-use).
+> **Disclaimer:** This is an independent, community-developed project and is not affiliated with, endorsed by, or in any way connected to [Visma](https://www.visma.com/) or [Wilma](https://www.wilma.fi/). _Wilma_ and _Inschool_ are products of Visma Solutions Oy. Use of their service is subject to their own [terms of use](https://help.wilma.fi/en/terms-of-use).
 
-A Home Assistant integration for the [Wilma](https://www.vismasolutions.com/fi/produkter/wilma/) school platform. Monitor your children's school day directly from Home Assistant — messages, timetables, lesson tracking and attendance history, all in one place.
+A Home Assistant integration for the [Wilma](https://www.wilma.fi/) school platform. Monitor your children's school day directly from Home Assistant — messages, timetables, lesson tracking and attendance history, all in one place.
 
 ## Features
 
