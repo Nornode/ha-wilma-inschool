@@ -9,5 +9,5 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/Nornode/ha-wilma-inschool/issues",
   "requirements": ["wilhelmina==0.1.9", "html2text==2025.4.15"],
-  "version": "2026.08.02"
+  "version": "2026.08.03"
 }
