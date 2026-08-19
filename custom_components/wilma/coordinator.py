@@ -16,9 +16,11 @@ from homeassistant.util import dt as dt_util
 from wilhelmina import AuthenticationError, Message, Sender, WilmaClient, WilmaError
 
 from .const import (
+    CONF_LANGUAGE,
     CONF_NO_MESSAGE_CONTENT_FETCH_LIMIT,
     CONF_ONLY_UNREAD,
     CONF_SCAN_INTERVAL_MINUTES,
+    DEFAULT_LANGUAGE,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL_MINUTES,
     DEFAULT_NO_MESSAGE_CONTENT_FETCH_LIMIT,
@@ -87,6 +89,16 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 DEFAULT_NO_MESSAGE_CONTENT_FETCH_LIMIT,
             )
         )
+
+    @property
+    def language(self) -> int:
+        """Return the configured langid for Wilma requests."""
+        return int(self.options.get(CONF_LANGUAGE, DEFAULT_LANGUAGE))
+
+    def _url_with_lang(self, url: str) -> str:
+        """Append ?langid= (or &langid=) to a Wilma URL."""
+        sep = "&" if "?" in url else "?"
+        return f"{url}{sep}langid={self.language}"
 
     @staticmethod
     def _timestamp_sort_key(message: dict[str, Any]) -> datetime:
@@ -208,7 +220,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
             session = await self.client._ensure_session()
             headers = {"Wilma2SID": self.client._sid or ""}
             full_url = f"{self.server_url.rstrip('/')}/{str(url).lstrip('/')}"
-            async with session.get(full_url, headers=headers) as resp:
+            async with session.get(self._url_with_lang(full_url), headers=headers) as resp:
                 if resp.status != 200:
                     self.last_fetch_errors.append(
                         f"News article for {student_id} returned HTTP {resp.status}"
@@ -254,7 +266,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
         try:
             session = await self.client._ensure_session()
             headers = {"Wilma2SID": self.client._sid or ""}
-            async with session.get(self.client.base_url, headers=headers) as response:
+            async with session.get(self._url_with_lang(self.client.base_url), headers=headers) as response:
                 if response.status != 200:
                     self.last_fetch_errors.append(
                         f"Home page returned HTTP {response.status}"
@@ -333,7 +345,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
             session = await self.client._ensure_session()
             headers = {"Wilma2SID": self.client._sid or ""}
             url = f"{self.server_url.rstrip('/')}/{student_id.lstrip('/')}/news"
-            async with session.get(url, headers=headers) as resp:
+            async with session.get(self._url_with_lang(url), headers=headers) as resp:
                 if resp.status != 200:
                     self.last_fetch_errors.append(
                         f"News for {student_id} returned HTTP {resp.status}"
@@ -494,7 +506,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
             if for_date:
                 path += f"?date={for_date.strftime('%d.%m.%Y')}"
             url = f"{self.server_url.rstrip('/')}/{path}"
-            async with session.get(url, headers=headers) as resp:
+            async with session.get(self._url_with_lang(url), headers=headers) as resp:
                 if resp.status != 200:
                     self.last_fetch_errors.append(
                         f"Schedule for {student_id} returned HTTP {resp.status}"
@@ -656,12 +668,12 @@ class WilmaCoordinator(DataUpdateCoordinator):
 
             # Full history view
             view_url = f"{base}/{uid}/attendance/view?range=-3&first=01.01.{year}&last=31.12.{year}"
-            async with session.get(view_url, headers=h) as resp:
+            async with session.get(self._url_with_lang(view_url), headers=h) as resp:
                 view_html = await resp.text() if resp.status == 200 else ""
 
             # Unexplained marks
             unexplained_url = f"{base}/{uid}/attendance"
-            async with session.get(unexplained_url, headers=h) as resp:
+            async with session.get(self._url_with_lang(unexplained_url), headers=h) as resp:
                 unexplained_html = await resp.text() if resp.status == 200 else ""
 
             all_marks = self._parse_attendance_view_html(view_html) if view_html else []

@@ -8,16 +8,19 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from wilhelmina import AuthenticationError, WilmaClient, WilmaError
 
 from .const import (
+    CONF_LANGUAGE,
     CONF_NO_MESSAGE_CONTENT_FETCH_LIMIT,
     CONF_ONLY_UNREAD,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL_MINUTES,
     CONF_SERVER_URL,
     CONF_USERNAME,
+    DEFAULT_LANGUAGE,
     DEFAULT_NO_MESSAGE_CONTENT_FETCH_LIMIT,
     DEFAULT_ONLY_UNREAD,
     DEFAULT_SCAN_INTERVAL_MINUTES,
@@ -136,6 +139,18 @@ class WilmaOptionsFlow(config_entries.OptionsFlow):
                         DEFAULT_NO_MESSAGE_CONTENT_FETCH_LIMIT,
                     ),
                 ): bool,
+                vol.Optional(
+                    CONF_LANGUAGE,
+                    default=options.get(CONF_LANGUAGE, DEFAULT_LANGUAGE),
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[
+                            {"value": "1", "label": "Finnish (Suomi)"},
+                            {"value": "2", "label": "Swedish (Svenska)"},
+                            {"value": "3", "label": "English"},
+                        ],
+                    )
+                ),
             }
         )
 

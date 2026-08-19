@@ -9,11 +9,13 @@ CONF_SERVER_URL = "server_url"
 CONF_SCAN_INTERVAL_MINUTES = "scan_interval_minutes"
 CONF_ONLY_UNREAD = "only_unread"
 CONF_NO_MESSAGE_CONTENT_FETCH_LIMIT = "no_message_content_fetch_limit"
+CONF_LANGUAGE = "language"
 
 DEFAULT_SCAN_INTERVAL = timedelta(minutes=30)
 DEFAULT_SCAN_INTERVAL_MINUTES = 30
 DEFAULT_ONLY_UNREAD = False
 DEFAULT_NO_MESSAGE_CONTENT_FETCH_LIMIT = False
+DEFAULT_LANGUAGE = "1"  # Finnish
 
 ATTR_CONTENT = "content"
 ATTR_CONTENT_MARKDOWN = "content_markdown"

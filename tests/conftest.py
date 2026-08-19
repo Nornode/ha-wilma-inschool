@@ -212,13 +212,14 @@ def mock_wilma_client(mock_wilma_client_discovery_html):
 
         def get(self, *args, **kwargs):
             url = args[0] if args else ""
-            if url.endswith("/") or url.endswith("inschool.fi"):
+            url_path = url.split("?")[0]
+            if url_path.endswith("/") or url_path.endswith("inschool.fi"):
                 return _MockResponse(mock_wilma_client_discovery_html)
-            if re.search(r"/news/\d+$", url):
-                news_id = int(url.rsplit("/", 1)[-1])
+            if re.search(r"/news/\d+$", url_path):
+                news_id = int(url_path.rsplit("/", 1)[-1])
                 article = MOCK_NEWS_ARTICLES.get(client.user_id, {}).get(news_id, "<html><body></body></html>")
                 return _MockResponse(article)
-            if "/news" in url:
+            if "/news" in url_path:
                 return _MockResponse(MOCK_NEWS_PAGES.get(client.user_id, "<html><body></body></html>"))
             return _MockResponse(mock_wilma_client_discovery_html)
 

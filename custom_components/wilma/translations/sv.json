@@ -27,7 +27,8 @@
         "data": {
           "scan_interval_minutes": "Uppdateringsintervall (minuter)",
           "only_unread": "Hämta endast olästa meddelanden",
-          "no_message_content_fetch_limit": "Inaktivera gräns för hämtning av meddelandeinnehåll"
+          "no_message_content_fetch_limit": "Inaktivera gräns för hämtning av meddelandeinnehåll",
+          "language": "Wilma-språk"
         }
       }
     }

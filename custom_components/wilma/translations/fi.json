@@ -27,7 +27,8 @@
         "data": {
           "scan_interval_minutes": "Päivitysväli (minuutteina)",
           "only_unread": "Hae vain lukemattomat viestit",
-          "no_message_content_fetch_limit": "Poista viestin sisältöhaun raja"
+          "no_message_content_fetch_limit": "Poista viestin sisältöhaun raja",
+          "language": "Wilma-kieli"
         }
       }
     }
