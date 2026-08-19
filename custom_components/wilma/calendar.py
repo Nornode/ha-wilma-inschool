@@ -115,7 +115,13 @@ class WilmaCalendarEntity(CoordinatorEntity, CalendarEntity):
         end_date: datetime,
     ) -> list[CalendarEvent]:
         """Return all events within the requested date range."""
+        raw_events = await self.coordinator.async_fetch_schedule_for_student_range(
+            self._student_id,
+            start_date,
+            end_date,
+        )
         return [
-            e for e in self._all_events()
+            e for raw in raw_events
+            if (e := self._raw_to_calendar_event(raw))
             if e.start < end_date and e.end > start_date
         ]

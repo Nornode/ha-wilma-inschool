@@ -1,5 +1,7 @@
 """Test the Wilma data update coordinator."""
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -136,6 +138,42 @@ async def test_coordinator_close(hass, mock_wilma_client):
     # Verify client was closed and reset
     mock_wilma_client.close.assert_called_once()
     assert coordinator.client is None
+
+
+async def test_coordinator_fetch_schedule_range_uses_requested_window(hass):
+    """Test schedule range fetching covers the requested calendar window."""
+    coordinator = WilmaCoordinator(
+        hass, "https://test.inschool.fi", "testuser", "testpass", "test_entry_id"
+    )
+
+    schedule_by_week = {
+        date(2024, 5, 13): [
+            {"id": "late", "date": "20.05.2024", "start_minutes": 600},
+            {"id": "early", "date": "15.05.2024", "start_minutes": 480},
+        ],
+        date(2024, 5, 20): [
+            {"id": "late", "date": "20.05.2024", "start_minutes": 600},
+            {"id": "middle", "date": "17.05.2024", "start_minutes": 540},
+        ],
+    }
+
+    async def _fetch_schedule(student_id, for_date):
+        assert student_id == "!STUDENT1"
+        return schedule_by_week[for_date]
+
+    coordinator._fetch_schedule_for_student = AsyncMock(side_effect=_fetch_schedule)
+
+    events = await coordinator.async_fetch_schedule_for_student_range(
+        "!STUDENT1",
+        datetime(2024, 5, 15, tzinfo=ZoneInfo("Europe/Helsinki")),
+        datetime(2024, 5, 27, tzinfo=ZoneInfo("Europe/Helsinki")),
+    )
+
+    assert coordinator._fetch_schedule_for_student.await_args_list == [
+        call("!STUDENT1", date(2024, 5, 13)),
+        call("!STUDENT1", date(2024, 5, 20)),
+    ]
+    assert [event["id"] for event in events] == ["early", "middle", "late"]
 
 
 async def test_coordinator_deduplicates_messages(hass, mock_wilma_client):

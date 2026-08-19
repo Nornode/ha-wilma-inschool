@@ -534,6 +534,33 @@ class WilmaCoordinator(DataUpdateCoordinator):
             d = date.min
         return (d, evt.get("start_minutes", 0))
 
+    async def async_fetch_schedule_for_student_range(
+        self,
+        student_id: str,
+        start_date: datetime,
+        end_date: datetime,
+    ) -> list[dict[str, Any]]:
+        """Fetch schedule events for a student in the requested calendar range."""
+        if end_date <= start_date:
+            return []
+
+        first_day = start_date.date()
+        last_day = end_date.date()
+        if end_date.time() == datetime.min.time():
+            last_day -= timedelta(days=1)
+
+        first_week = first_day - timedelta(days=first_day.weekday())
+        last_week = last_day - timedelta(days=last_day.weekday())
+
+        seen_ids: dict[str, dict[str, Any]] = {}
+        week_date = first_week
+        while week_date <= last_week:
+            for evt in await self._fetch_schedule_for_student(student_id, week_date):
+                seen_ids[evt["id"]] = evt
+            week_date += timedelta(weeks=1)
+
+        return sorted(seen_ids.values(), key=self._schedule_sort_key)
+
     @staticmethod
     def _parse_attendance_view_html(html: str) -> list[dict[str, Any]]:
         """Parse the full attendance history from /attendance/view.
