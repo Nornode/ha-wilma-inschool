@@ -45,6 +45,12 @@
       "unread_count": {
         "name": "Lukemattomat viestit"
       },
+      "latest_bulletin": {
+        "name": "Uusin tiedote"
+      },
+      "unread_bulletin_count": {
+        "name": "Lukemattomat tiedotteet"
+      },
       "last_update": {
         "name": "Viimeisin päivitys"
       },

@@ -136,3 +136,6 @@ dmypy.json
 
 # Local helper scripts with hardcoded credentials
 scripts/*.local.sh
+
+# Consolidated local planning note
+TODO-data-points.md

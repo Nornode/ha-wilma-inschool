@@ -23,10 +23,16 @@ ATTR_TIMESTAMP = "timestamp"
 ATTR_ID = "id"
 ATTR_STUDENT_ID = "student_id"
 ATTR_STUDENT_NAME = "student_name"
+ATTR_NEWS_ID = "news_id"
+ATTR_NEWS_DATE = "date"
+ATTR_NEWS_SECTION = "section"
+ATTR_NEWS_URL = "url"
 
 SENSOR_LATEST_MESSAGE = "latest_message"
 SENSOR_UNREAD_COUNT = "unread_count"
 SENSOR_NEXT_LESSON = "next_lesson"
+SENSOR_LATEST_BULLETIN = "latest_bulletin"
+SENSOR_UNREAD_BULLETIN_COUNT = "unread_bulletin_count"
 
 BINARY_SENSOR_PROBLEM = "problem"
 SENSOR_ATTENDANCE_COUNT = "attendance_count"
@@ -37,5 +43,6 @@ STORAGE_VERSION = 1
 
 EVENT_NEW_MESSAGE = "wilma_new_message"
 EVENT_NEW_ATTENDANCE = "wilma_new_attendance_mark"
+EVENT_NEW_BULLETIN = "wilma_new_bulletin"
 
 SCHEDULE_WEEKS_AHEAD = 4  # number of weeks to fetch for the calendar

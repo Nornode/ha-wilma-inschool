@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from bs4 import BeautifulSoup
+import html2text
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
@@ -23,6 +24,7 @@ from .const import (
     DEFAULT_NO_MESSAGE_CONTENT_FETCH_LIMIT,
     DEFAULT_ONLY_UNREAD,
     DOMAIN,
+    EVENT_NEW_BULLETIN,
     EVENT_NEW_ATTENDANCE,
     EVENT_NEW_MESSAGE,
     SCHEDULE_WEEKS_AHEAD,
@@ -109,6 +111,23 @@ class WilmaCoordinator(DataUpdateCoordinator):
             serialized.append({"name": sender.name, "href": sender.href})
         return serialized
 
+    @staticmethod
+    def _news_sort_key(news_item: dict[str, Any]) -> tuple[int, int]:
+        news_id = news_item.get("news_id")
+        try:
+            return (0, int(news_id))
+        except (TypeError, ValueError):
+            return (1, 0)
+
+    @staticmethod
+    def _html_to_markdown(html: str) -> str:
+        """Convert HTML to markdown for notification-friendly output."""
+        converter = html2text.HTML2Text()
+        converter.ignore_links = False
+        converter.ignore_images = True
+        converter.body_width = 0
+        return converter.handle(html).strip()
+
     def _message_to_dict(self, message: Message, student_id: str, student_name: str) -> dict[str, Any]:
         """Convert a Wilhelmina message object into a serializable dict."""
         msg_dict: dict[str, Any] = {
@@ -134,6 +153,93 @@ class WilmaCoordinator(DataUpdateCoordinator):
             except ValueError:
                 pass
         return msg_dict
+
+    @staticmethod
+    def _parse_news_html(html: str, student_id: str, student_name: str) -> list[dict[str, Any]]:
+        """Parse the Wilma news page into serializable bulletin dicts."""
+        soup = BeautifulSoup(html, "html.parser")
+        items: list[dict[str, Any]] = []
+        current_section = ""
+        for element in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "a"]):
+            if element.name in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+                current_section = element.get_text(" ", strip=True)
+                continue
+
+            href = element.get("href") or ""
+            match = re.search(rf"/{re.escape(student_id.lstrip('/'))}/news/(\d+)", href)
+            if not match:
+                continue
+
+            news_id = match.group(1)
+            title = element.get_text(" ", strip=True)
+            if not title:
+                continue
+
+            items.append(
+                {
+                    "news_id": int(news_id),
+                    "title": title,
+                    "date": current_section,
+                    "section": current_section,
+                    "url": f"{student_id.rstrip('/')}/news/{news_id}",
+                    "student_id": student_id,
+                    "student_name": student_name,
+                }
+            )
+
+        deduped: dict[int, dict[str, Any]] = {}
+        for item in items:
+            deduped[item["news_id"]] = item
+        return sorted(deduped.values(), key=WilmaCoordinator._news_sort_key)
+
+    async def _fetch_news_body(self, student_id: str, news_item: dict[str, Any]) -> dict[str, Any]:
+        """Fetch and attach article body for a single bulletin."""
+        if not self.client:
+            return news_item
+
+        item = dict(news_item)
+        url = item.get("url")
+        if not url:
+            return item
+
+        original_user_id = self.client.user_id
+        self.client.user_id = student_id
+        try:
+            session = await self.client._ensure_session()
+            headers = {"Wilma2SID": self.client._sid or ""}
+            full_url = f"{self.server_url.rstrip('/')}/{str(url).lstrip('/')}"
+            async with session.get(full_url, headers=headers) as resp:
+                if resp.status != 200:
+                    self.last_fetch_errors.append(
+                        f"News article for {student_id} returned HTTP {resp.status}"
+                    )
+                    return item
+                html = await resp.text()
+        except Exception as err:
+            _LOGGER.debug("Error fetching news article for %s: %s", student_id, err)
+            self.last_fetch_errors.append(f"News article fetch for {student_id} failed: {err}")
+            return item
+        finally:
+            self.client.user_id = original_user_id
+
+        soup = BeautifulSoup(html, "html.parser")
+        title = item.get("title") or ""
+        heading = soup.find(["h1", "h2", "h3"])
+        if heading and heading.get_text(" ", strip=True):
+            title = heading.get_text(" ", strip=True)
+
+        content_root = soup.find("article") or soup.body or soup
+        content_html = content_root.decode_contents().strip() if hasattr(content_root, "decode_contents") else html.strip()
+        content_markdown = self._html_to_markdown(content_html)
+
+        item.update(
+            {
+                "title": title,
+                "content_html": content_html,
+                "content_markdown": content_markdown,
+            }
+        )
+        return item
 
     async def _discover_students(self) -> list[dict[str, str]]:
         """Discover available user IDs from the authenticated home page."""
@@ -216,6 +322,40 @@ class WilmaCoordinator(DataUpdateCoordinator):
         )
         return [self._message_to_dict(message, student_id, student_name) for message in messages]
 
+    async def _fetch_news_for_student(self, student_id: str) -> list[dict[str, Any]]:
+        """Fetch news items for one student user ID."""
+        if not self.client:
+            return []
+
+        original_user_id = self.client.user_id
+        self.client.user_id = student_id
+        try:
+            session = await self.client._ensure_session()
+            headers = {"Wilma2SID": self.client._sid or ""}
+            url = f"{self.server_url.rstrip('/')}/{student_id.lstrip('/')}/news"
+            async with session.get(url, headers=headers) as resp:
+                if resp.status != 200:
+                    self.last_fetch_errors.append(
+                        f"News for {student_id} returned HTTP {resp.status}"
+                    )
+                    return []
+                html = await resp.text()
+            student_name = next(
+                (
+                    profile["name"]
+                    for profile in self.student_profiles
+                    if profile["id"] == student_id
+                ),
+                self.username,
+            )
+            return self._parse_news_html(html, student_id, student_name)
+        except Exception as err:
+            _LOGGER.debug("Error fetching news for %s: %s", student_id, err)
+            self.last_fetch_errors.append(f"News fetch for {student_id} failed: {err}")
+            return []
+        finally:
+            self.client.user_id = original_user_id
+
     @staticmethod
     def _merge_messages(
         existing_messages: list[dict[str, Any]],
@@ -246,6 +386,30 @@ class WilmaCoordinator(DataUpdateCoordinator):
         new_messages.sort(key=WilmaCoordinator._timestamp_sort_key, reverse=True)
 
         return merged, new_messages
+
+    @staticmethod
+    def _merge_news(
+        existing_news: list[dict[str, Any]],
+        fetched_news: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Merge bulletin lists and deduplicate by news id."""
+        existing_by_id = {
+            item["news_id"]: item
+            for item in existing_news
+            if "news_id" in item
+        }
+        existing_ids = set(existing_by_id)
+
+        for item in fetched_news:
+            news_id = item.get("news_id")
+            if news_id is None:
+                continue
+            existing_by_id[news_id] = item
+
+        merged = sorted(existing_by_id.values(), key=WilmaCoordinator._news_sort_key, reverse=True)
+        new_items = [item for item in fetched_news if item.get("news_id") not in existing_ids]
+        new_items.sort(key=WilmaCoordinator._news_sort_key, reverse=True)
+        return merged, new_items
 
     @staticmethod
     def _parse_schedule_html(
@@ -512,8 +676,11 @@ class WilmaCoordinator(DataUpdateCoordinator):
         self.last_fetch_errors = []
         data = await self.store.async_load() or {}
         stored_students = data.get("students", {})
+        stored_news = data.get("news", {})
         if not isinstance(stored_students, dict):
             stored_students = {}
+        if not isinstance(stored_news, dict):
+            stored_news = {}
 
         try:
             if self.client is None:
@@ -531,10 +698,12 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 self.student_profiles = [{"id": self.client.user_id, "name": self.username}]
 
             updated_students: dict[str, list[dict[str, Any]]] = {}
+            updated_news: dict[str, list[dict[str, Any]]] = {}
 
             for student in self.student_profiles:
                 student_id = student["id"]
                 existing_messages = stored_students.get(student_id, [])
+                existing_news = stored_news.get(student_id, [])
 
                 after_timestamp = None
                 if existing_messages and isinstance(existing_messages[0].get("timestamp"), str):
@@ -571,7 +740,34 @@ class WilmaCoordinator(DataUpdateCoordinator):
                             },
                         )
 
-            await self.store.async_save({"students": updated_students})
+                fetched_news = await self._fetch_news_for_student(student_id)
+                merged_news, new_news = self._merge_news(existing_news, fetched_news)
+
+                if merged_news:
+                    merged_news[0] = await self._fetch_news_body(student_id, merged_news[0])
+
+                updated_news[student_id] = merged_news
+
+                if new_news and existing_news:
+                    for item in new_news:
+                        item = await self._fetch_news_body(student_id, item)
+                        self.hass.bus.async_fire(
+                            EVENT_NEW_BULLETIN,
+                            {
+                                "entry_id": self.entry_id,
+                                "student_id": student_id,
+                                "student_name": student["name"],
+                                "news_id": item.get("news_id"),
+                                "title": item.get("title"),
+                                "date": item.get("date"),
+                                "section": item.get("section"),
+                                "url": item.get("url"),
+                                "content_html": item.get("content_html"),
+                                "content_markdown": item.get("content_markdown"),
+                            },
+                        )
+
+            await self.store.async_save({"students": updated_students, "news": updated_news})
 
             # Fetch schedules for the upcoming weeks for each student
             today = dt_util.now().date()
@@ -620,9 +816,17 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 student_id: messages[0] if messages else None
                 for student_id, messages in updated_students.items()
             }
+            latest_bulletin_by_student = {
+                student_id: news_items[0] if news_items else None
+                for student_id, news_items in updated_news.items()
+            }
             unread_count_by_student = {
                 student_id: sum(1 for message in messages if message.get("unread"))
                 for student_id, messages in updated_students.items()
+            }
+            unread_bulletin_count_by_student = {
+                student_id: max(len(updated_news.get(student_id, [])) - len(stored_news.get(student_id, [])), 0)
+                for student_id in {p["id"] for p in self.student_profiles}
             }
 
             all_messages = [
@@ -640,6 +844,9 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 "latest_message_by_student": latest_message_by_student,
                 "unread_count": sum(unread_count_by_student.values()),
                 "unread_count_by_student": unread_count_by_student,
+                "news": updated_news,
+                "latest_bulletin_by_student": latest_bulletin_by_student,
+                "unread_bulletin_count_by_student": unread_bulletin_count_by_student,
                 "last_update": dt_util.as_local(self.last_update_success_time),
                 "schedules": schedules,
                 "attendance": attendance,

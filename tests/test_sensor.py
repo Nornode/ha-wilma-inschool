@@ -9,6 +9,7 @@ from custom_components.wilma.const import (
     ATTR_CONTENT,
     ATTR_CONTENT_MARKDOWN,
     ATTR_ID,
+    ATTR_NEWS_ID,
     ATTR_SENDER,
     ATTR_STUDENT_ID,
     ATTR_STUDENT_NAME,
@@ -29,14 +30,14 @@ async def test_sensors_state(hass: HomeAssistant, mock_setup_integration):
     """Test sensor states."""
     # Complete setup
     await mock_setup_integration()
-    
+
     # Check student 1 latest message sensor
     state = hass.states.get(
         _entity_id_for_unique_id(hass, "test_!STUDENT1_latest_message")
     )
     assert state is not None
     assert state.state == "Test Message 1"
-    
+
     # Check attributes
     assert state.attributes[ATTR_ID] == 1
     assert state.attributes[ATTR_SUBJECT] == "Test Message 1"
@@ -53,6 +54,24 @@ async def test_sensors_state(hass: HomeAssistant, mock_setup_integration):
     )
     assert state is not None
     assert state.state == "1"
+
+    # Check student 1 latest bulletin sensor
+    state = hass.states.get(
+        _entity_id_for_unique_id(hass, "test_!STUDENT1_latest_bulletin")
+    )
+    assert state is not None
+    assert state.state == "Kid One latest bulletin"
+    assert state.attributes[ATTR_NEWS_ID] == 101
+    assert state.attributes[ATTR_CONTENT] == "<h1>Kid One latest bulletin</h1>\n<p>Line one for kid one.</p>\n<p><strong>Important</strong> update with a <a href=\"https://example.com\">link</a>.</p>"
+    assert "Line one for kid one." in state.attributes[ATTR_CONTENT_MARKDOWN]
+    assert "[link](https://example.com)" in state.attributes[ATTR_CONTENT_MARKDOWN]
+
+    # Check student 1 unread bulletin count sensor
+    state = hass.states.get(
+        _entity_id_for_unique_id(hass, "test_!STUDENT1_unread_bulletin_count")
+    )
+    assert state is not None
+    assert state.state == "2"
 
     # Check student 2 latest message sensor
     state = hass.states.get(
@@ -87,12 +106,12 @@ async def test_sensor_no_messages(hass: HomeAssistant, mock_config_entry):
         client.login = AsyncMock()
         client.get_messages = AsyncMock(return_value=[])
         client._ensure_session = AsyncMock(side_effect=RuntimeError("No session"))
-        
+
         # Set up entry
         mock_config_entry.add_to_hass(hass)
         await hass.config_entries.async_setup(mock_config_entry.entry_id)
         await hass.async_block_till_done()
-    
+
     # Check latest message sensor - should be unknown
     state = hass.states.get(
         _entity_id_for_unique_id(hass, "test_!STUDENT1_latest_message")
@@ -103,6 +122,13 @@ async def test_sensor_no_messages(hass: HomeAssistant, mock_config_entry):
     # Check unread messages sensor for no messages
     state = hass.states.get(
         _entity_id_for_unique_id(hass, "test_!STUDENT1_unread_count")
+    )
+    assert state is not None
+    assert state.state == "0"
+
+    # Check unread bulletin sensor for no news
+    state = hass.states.get(
+        _entity_id_for_unique_id(hass, "test_!STUDENT1_unread_bulletin_count")
     )
     assert state is not None
     assert state.state == "0"

@@ -45,6 +45,12 @@
       "unread_count": {
         "name": "Olästa meddelanden"
       },
+      "latest_bulletin": {
+        "name": "Senaste meddelande"
+      },
+      "unread_bulletin_count": {
+        "name": "Olästa meddelanden"
+      },
       "last_update": {
         "name": "Senaste uppdatering"
       },

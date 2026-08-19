@@ -24,6 +24,10 @@ from .const import (
     ATTR_CONTENT,
     ATTR_CONTENT_MARKDOWN,
     ATTR_ID,
+    ATTR_NEWS_DATE,
+    ATTR_NEWS_ID,
+    ATTR_NEWS_SECTION,
+    ATTR_NEWS_URL,
     ATTR_SENDER,
     ATTR_STUDENT_ID,
     ATTR_STUDENT_NAME,
@@ -31,9 +35,11 @@ from .const import (
     ATTR_TIMESTAMP,
     DOMAIN,
     SENSOR_ATTENDANCE_COUNT,
+    SENSOR_LATEST_BULLETIN,
     SENSOR_LATEST_ATTENDANCE,
     SENSOR_LATEST_MESSAGE,
     SENSOR_NEXT_LESSON,
+    SENSOR_UNREAD_BULLETIN_COUNT,
     SENSOR_UNREAD_COUNT,
 )
 from .coordinator import WilmaCoordinator
@@ -50,7 +56,17 @@ SENSOR_DESCRIPTIONS = [
         key=SENSOR_UNREAD_COUNT,
         name="Unread Messages",
         icon="mdi:email-alert",
-    )
+    ),
+    SensorEntityDescription(
+        key=SENSOR_LATEST_BULLETIN,
+        name="Latest Bulletin",
+        icon="mdi:bullhorn",
+    ),
+    SensorEntityDescription(
+        key=SENSOR_UNREAD_BULLETIN_COUNT,
+        name="Unread Bulletins",
+        icon="mdi:bullhorn-outline",
+    ),
 ]
 
 
@@ -82,6 +98,24 @@ async def async_setup_entry(
             WilmaUnreadCountSensor(
                 coordinator,
                 SENSOR_DESCRIPTIONS[1],
+                entry,
+                student_id,
+                student_name,
+            )
+        )
+        entities.append(
+            WilmaLatestBulletinSensor(
+                coordinator,
+                SENSOR_DESCRIPTIONS[2],
+                entry,
+                student_id,
+                student_name,
+            )
+        )
+        entities.append(
+            WilmaUnreadBulletinCountSensor(
+                coordinator,
+                SENSOR_DESCRIPTIONS[3],
                 entry,
                 student_id,
                 student_name,
@@ -254,6 +288,54 @@ class WilmaUnreadCountSensor(WilmaBaseStudentSensor):
         if not self.coordinator.data:
             return None
         return self.coordinator.data.get("unread_count_by_student", {}).get(self._student_id, 0)
+
+
+class WilmaLatestBulletinSensor(WilmaBaseStudentSensor):
+    """Sensor representing the latest bulletin for one student."""
+
+    @property
+    def native_value(self) -> str | None:
+        if not self.coordinator.data:
+            return None
+
+        item = self.coordinator.data.get("latest_bulletin_by_student", {}).get(self._student_id)
+        return item.get("title") if item else None
+
+    @property
+    def extra_state_attributes(self) -> Optional[Dict[str, Any]]:
+        attrs = super().extra_state_attributes or {}
+        if not self.coordinator.data:
+            return attrs
+
+        item = self.coordinator.data.get("latest_bulletin_by_student", {}).get(self._student_id)
+        if not item:
+            return attrs
+
+        attrs.update(
+            {
+                ATTR_NEWS_ID: item.get("news_id"),
+                ATTR_SUBJECT: item.get("title"),
+                ATTR_NEWS_DATE: item.get("date"),
+                ATTR_NEWS_SECTION: item.get("section"),
+                ATTR_NEWS_URL: item.get("url"),
+            }
+        )
+
+        if item.get("content_html"):
+            attrs[ATTR_CONTENT] = item.get("content_html")
+        if item.get("content_markdown"):
+            attrs[ATTR_CONTENT_MARKDOWN] = item.get("content_markdown")
+        return attrs
+
+
+class WilmaUnreadBulletinCountSensor(WilmaBaseStudentSensor):
+    """Sensor representing bulletin updates discovered in the latest refresh."""
+
+    @property
+    def native_value(self) -> int:
+        if not self.coordinator.data:
+            return 0
+        return self.coordinator.data.get("unread_bulletin_count_by_student", {}).get(self._student_id, 0)
 
 
 class WilmaLastUpdateSensor(CoordinatorEntity, SensorEntity):

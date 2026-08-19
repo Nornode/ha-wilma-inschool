@@ -45,6 +45,12 @@
       "unread_count": {
         "name": "Unread Messages"
       },
+      "latest_bulletin": {
+        "name": "Latest Bulletin"
+      },
+      "unread_bulletin_count": {
+        "name": "Unread Bulletins"
+      },
       "last_update": {
         "name": "Last Update"
       },
