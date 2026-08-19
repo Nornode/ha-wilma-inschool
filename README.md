@@ -164,6 +164,10 @@ mypy custom_components/wilma
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+## Credits
+
+This integration is based on the original work by [Fredrik Wickström (@frwickst)](https://github.com/frwickst) — see [frwickst/wilma_ha](https://github.com/frwickst/wilma_ha). The upstream library powering the Wilma API client is [wilhelmina](https://github.com/frwickst/wilhelmina), also by Fredrik.
+
 ## License
 
 MIT
