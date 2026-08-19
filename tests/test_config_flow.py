@@ -13,7 +13,7 @@ from custom_components.wilma.const import (
 )
 
 
-async def test_form(hass, mock_wilma_client):
+async def test_form(hass, mock_wilma_flow_client):
     """Test we get the form."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
@@ -59,7 +59,7 @@ async def test_form_invalid_auth(hass, mock_wilma_exception_client):
     assert result["errors"] == {"base": "invalid_auth"}
 
 
-async def test_duplicate_entries(hass, mock_wilma_client):
+async def test_duplicate_entries(hass, mock_wilma_flow_client):
     """Test handling of duplicate entries."""
     # Add existing entry
     entry = MockConfigEntry(
@@ -90,3 +90,25 @@ async def test_duplicate_entries(hass, mock_wilma_client):
 
     # Should still allow creating, as we don't set unique_id in the integration yet
     assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+
+
+async def test_options_flow(hass, mock_config_entry):
+    """Test options flow fields and save."""
+    mock_config_entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(mock_config_entry.entry_id)
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            "scan_interval_minutes": 10,
+            "only_unread": True,
+            "no_message_content_fetch_limit": True,
+        },
+    )
+
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["data"]["scan_interval_minutes"] == 10
+    assert result["data"]["only_unread"] is True
+    assert result["data"]["no_message_content_fetch_limit"] is True

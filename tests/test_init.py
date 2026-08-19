@@ -1,11 +1,8 @@
 """Test the Wilma integration initialization."""
-from unittest.mock import patch
-
-import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_registry import async_get as get_entity_registry
 
-from custom_components.wilma.const import DOMAIN, SENSOR_LATEST_MESSAGE
+from custom_components.wilma.const import DOMAIN
 
 
 async def test_setup_and_unload_entry(hass: HomeAssistant, mock_setup_integration):
@@ -18,14 +15,36 @@ async def test_setup_and_unload_entry(hass: HomeAssistant, mock_setup_integratio
     
     # Verify entities are set up
     entity_registry = get_entity_registry(hass)
-    latest_message_entity = entity_registry.async_get(f"sensor.latest_message")
-    assert latest_message_entity is not None
-    
-    latest_unread_entity = entity_registry.async_get(f"sensor.latest_unread_message")
-    assert latest_unread_entity is not None
-    
-    last_update_entity = entity_registry.async_get(f"sensor.last_update")
-    assert last_update_entity is not None
+    assert (
+        entity_registry.async_get_entity_id(
+            "sensor", DOMAIN, "test_!STUDENT1_latest_message"
+        )
+        is not None
+    )
+    assert (
+        entity_registry.async_get_entity_id(
+            "sensor", DOMAIN, "test_!STUDENT1_unread_count"
+        )
+        is not None
+    )
+    assert (
+        entity_registry.async_get_entity_id(
+            "sensor", DOMAIN, "test_!STUDENT1_last_update"
+        )
+        is not None
+    )
+    assert (
+        entity_registry.async_get_entity_id(
+            "sensor", DOMAIN, "test_!STUDENT2_latest_message"
+        )
+        is not None
+    )
+    assert (
+        entity_registry.async_get_entity_id(
+            "sensor", DOMAIN, "test_!STUDENT2_last_update"
+        )
+        is not None
+    )
 
     # Unload the entry
     assert await hass.config_entries.async_unload(entry.entry_id)

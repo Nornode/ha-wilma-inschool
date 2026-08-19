@@ -11,7 +11,18 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from wilhelmina import AuthenticationError, WilmaClient, WilmaError
 
-from .const import CONF_PASSWORD, CONF_SERVER_URL, CONF_USERNAME, DOMAIN
+from .const import (
+    CONF_NO_MESSAGE_CONTENT_FETCH_LIMIT,
+    CONF_ONLY_UNREAD,
+    CONF_PASSWORD,
+    CONF_SCAN_INTERVAL_MINUTES,
+    CONF_SERVER_URL,
+    CONF_USERNAME,
+    DEFAULT_NO_MESSAGE_CONTENT_FETCH_LIMIT,
+    DEFAULT_ONLY_UNREAD,
+    DEFAULT_SCAN_INTERVAL_MINUTES,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,6 +69,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    @staticmethod
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> config_entries.OptionsFlow:
+        """Get the options flow for this handler."""
+        return WilmaOptionsFlow()
+
     async def async_step_user(
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> FlowResult:
@@ -87,3 +105,38 @@ class CannotConnect(HomeAssistantError):
 
 class InvalidAuth(HomeAssistantError):
     """Error to indicate there is invalid auth."""
+
+
+class WilmaOptionsFlow(config_entries.OptionsFlow):
+    """Handle Wilma options."""
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Manage the integration options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        options = self.config_entry.options
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_SCAN_INTERVAL_MINUTES,
+                    default=options.get(
+                        CONF_SCAN_INTERVAL_MINUTES,
+                        DEFAULT_SCAN_INTERVAL_MINUTES,
+                    ),
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=360)),
+                vol.Optional(
+                    CONF_ONLY_UNREAD,
+                    default=options.get(CONF_ONLY_UNREAD, DEFAULT_ONLY_UNREAD),
+                ): bool,
+                vol.Optional(
+                    CONF_NO_MESSAGE_CONTENT_FETCH_LIMIT,
+                    default=options.get(
+                        CONF_NO_MESSAGE_CONTENT_FETCH_LIMIT,
+                        DEFAULT_NO_MESSAGE_CONTENT_FETCH_LIMIT,
+                    ),
+                ): bool,
+            }
+        )
+
+        return self.async_show_form(step_id="init", data_schema=schema)

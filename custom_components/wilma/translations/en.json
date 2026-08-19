@@ -20,10 +20,25 @@
       "already_configured": "This Wilma account is already configured"
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Wilma options",
+        "data": {
+          "scan_interval_minutes": "Polling interval (minutes)",
+          "only_unread": "Fetch only unread messages",
+          "no_message_content_fetch_limit": "Disable full-content fetch limit"
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "latest_message": {
         "name": "Latest Message"
+      },
+      "unread_count": {
+        "name": "Unread Messages"
       },
       "last_update": {
         "name": "Last Update"
