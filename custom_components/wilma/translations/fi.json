@@ -5,7 +5,7 @@
         "title": "Yhdistä Wilmaan",
         "description": "Määritä Wilma-integraatio viestien käyttöä varten.",
         "data": {
-          "server_url": "Wilma-palvelimen osoite (esim. https://espoo.inschool.fi)",
+          "server_url": "Wilma-palvelimen osoite",
           "username": "Käyttäjätunnus",
           "password": "Salasana"
         }

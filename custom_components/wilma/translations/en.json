@@ -5,7 +5,7 @@
         "title": "Connect to Wilma",
         "description": "Set up Wilma integration to access your messages.",
         "data": {
-          "server_url": "Wilma Server URL (e.g. https://turku.inschool.fi)",
+          "server_url": "Wilma server URL",
           "username": "Username",
           "password": "Password"
         }

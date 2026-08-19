@@ -5,7 +5,7 @@
         "title": "Anslut till Wilma",
         "description": "Konfigurera Wilma-integrationen för att komma åt dina meddelanden.",
         "data": {
-          "server_url": "Wilma-serveradress (t.ex. https://espoo.inschool.fi)",
+          "server_url": "Wilma-serveradress",
           "username": "Användarnamn",
           "password": "Lösenord"
         }
