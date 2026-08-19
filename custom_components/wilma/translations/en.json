@@ -33,6 +33,11 @@
     }
   },
   "entity": {
+    "binary_sensor": {
+      "problem": {
+        "name": "Problem"
+      }
+    },
     "sensor": {
       "latest_message": {
         "name": "Latest Message"
@@ -42,6 +47,20 @@
       },
       "last_update": {
         "name": "Last Update"
+      },
+      "next_lesson": {
+        "name": "Next Lesson"
+      },
+      "attendance_count": {
+        "name": "Attendance Marks"
+      },
+      "latest_attendance": {
+        "name": "Latest Attendance Mark"
+      }
+    },
+    "calendar": {
+      "schedule": {
+        "name": "Schedule"
       }
     }
   }

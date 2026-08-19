@@ -1,119 +1,151 @@
 # Wilma for Home Assistant
 
-A Home Assistant integration for the Wilma school platform. This integration allows you to fetch and display your Wilma messages in Home Assistant.
+A Home Assistant integration for the [Wilma](https://www.vismasolutions.com/fi/produkter/wilma/) school platform. Monitor your children's school day directly from Home Assistant — messages, timetables, lesson tracking and attendance history, all in one place.
 
 ## Features
 
-- Polls Wilma for new messages every 15 minutes
-- Provides sensors for latest message, latest unread message, and last update time
-- Stores message content for access by automations
-- Allows creating automations based on new messages
+- **Multi-student support** — separate device per child, named _Wilma {First name}_
+- **Messages** — polls for new messages every 15 minutes, fires an event on each new one
+- **Schedule & Calendar** — fetches timetable for the current and upcoming weeks; exposes a native HA calendar entity per student and a _Next Lesson_ sensor
+- **Attendance** — fetches the full school-year attendance history; tracks unexplained marks and fires an event when new marks appear
+- **Multilingual UI** — config/options flow translated to English, Finnish and Swedish
+- Configurable poll interval, unread-only mode and message-fetch limits
+
+## Entities
+
+All entities live under the **Wilma {First name}** device (e.g. _Wilma Alice_).
+
+| Entity                   | Type     | Description                                                                                        |
+| ------------------------ | -------- | -------------------------------------------------------------------------------------------------- |
+| `latest_message`         | Sensor   | Subject of the most recent message; full content in attributes                                     |
+| `unread_messages`        | Sensor   | Count of unread messages                                                                           |
+| `next_lesson`            | Sensor   | Subject of the next upcoming lesson; start/end time, room and teacher in attributes                |
+| `attendance_marks`       | Sensor   | Total attendance marks this school year; `unexplained_count` and `by_type` breakdown in attributes |
+| `latest_attendance_mark` | Sensor   | Most recent mark type; date, lesson hour, subject code and teacher in attributes                   |
+| `last_update`            | Sensor   | Timestamp of the last successful coordinator refresh                                               |
+| `schedule`               | Calendar | Full timetable calendar — shows in the HA Calendar UI and supports date-range queries              |
+
+## Events
+
+| Event                       | Payload fields                                                            | When fired                                   |
+| --------------------------- | ------------------------------------------------------------------------- | -------------------------------------------- |
+| `wilma_new_message`         | `student_id`, `student_name`, `subject`, `sender`, `timestamp`, `content` | New message appears                          |
+| `wilma_new_attendance_mark` | `student_id`, `student_name`, `mark` (dict)                               | New attendance mark detected in full history |
 
 ## Installation
 
 ### HACS (Recommended)
 
-1. Make sure you have [HACS](https://hacs.xyz/) installed
+1. Make sure you have [HACS](https://hacs.xyz/) installed.
 2. Add this repository as a custom repository in HACS:
-   - Go to HACS → Integrations → ⋮ (menu) → Custom repositories
-   - Add `https://github.com/frwickst/wilma_ha` with category "Integration"
-3. Install the integration from HACS
-4. Restart Home Assistant
+   - Go to **HACS → Integrations → ⋮ → Custom repositories**
+   - Add `https://github.com/Nornode/ha-wilma-inschool` with category **Integration**
+3. Install _Wilma_ from HACS.
+4. Restart Home Assistant.
 
 ### Manual Installation
 
-1. Copy the `custom_components/wilma` folder from this repository to your Home Assistant's `custom_components` directory
-2. Restart Home Assistant
+1. Copy the `custom_components/wilma` folder to your Home Assistant `custom_components` directory.
+2. Restart Home Assistant.
 
 ## Configuration
 
-1. Go to Configuration → Integrations → Add Integration
-2. Search for "Wilma" and select it
-3. Enter your Wilma server URL, username, and password
-4. Click "Submit"
+1. Go to **Settings → Devices & Services → Add Integration**.
+2. Search for **Wilma** and select it.
+3. Enter your Wilma server URL (e.g. `https://espoo.inschool.fi`), username and password.
+4. Click **Submit**.
 
-## Usage
+Options (scan interval, unread-only, fetch limits) can be changed at any time via **Configure** on the integration card.
 
-After setup, the integration will provide the following sensors:
+## Automation Examples
 
-- `sensor.latest_message`: The most recent message (subject as state, content in attributes)
-- `sensor.last_update`: Timestamp of the last successful data update
-
-### Automation Example
-
-Here's an example automation that sends a notification when a new message is received:
+### Notify on new message
 
 ```yaml
 automation:
-  - alias: "Notify on new Wilma message"
+  - alias: "Wilma — new message notification"
     trigger:
-      platform: state
-      entity_id: sensor.latest_message
+      platform: event
+      event_type: wilma_new_message
     action:
-      - service: notify.mobile_app
+      - service: notify.mobile_app_your_phone
         data:
-          title: "New Wilma Message"
-          message: "{{ trigger.to_state.state }}"
-          data:
-            clickAction: /lovelace/wilma
+          title: "New message from {{ trigger.event.data.sender }}"
+          message: "{{ trigger.event.data.subject }}"
 ```
 
-### AI Summarization Example
-
-To use with Home Assistant's conversation agents for summarization:
+### AI-summarise a new message
 
 ```yaml
 automation:
-  - alias: "Summarize new Wilma message with AI"
+  - alias: "Wilma — AI message summary"
     trigger:
-      platform: state
-      entity_id: sensor.latest_message
+      platform: event
+      event_type: wilma_new_message
     action:
       - service: conversation.process
         data:
           agent_id: homeassistant
           text: >
-            Summarize this message in a concise way: {{ state_attr('sensor.latest_message', 'content_markdown') }}
-          agent_id: homeassistant
-      - service: notify.mobile_app
+            Summarise this school message briefly:
+            {{ trigger.event.data.content }}
+        response_variable: summary
+      - service: notify.mobile_app_your_phone
         data:
-          title: "New Wilma Message Summary"
-          message: "{{ conversation.agent_response.response.speech.plain.text }}"
+          title: "Wilma — {{ trigger.event.data.sender }}"
+          message: "{{ summary.response.speech.plain.speech }}"
+```
+
+### Notify on unexplained attendance mark
+
+```yaml
+automation:
+  - alias: "Wilma — unexplained attendance mark"
+    trigger:
+      platform: event
+      event_type: wilma_new_attendance_mark
+    action:
+      - service: notify.mobile_app_your_phone
+        data:
+          title: "Attendance mark — {{ trigger.event.data.student_name }}"
+          message: >
+            {{ trigger.event.data.mark.mark_type }}
+            {{ trigger.event.data.mark.date }}, hour {{ trigger.event.data.mark.lesson_hour }}
+            ({{ trigger.event.data.mark.subject_code }})
+```
+
+### Dashboard — today's schedule card
+
+```yaml
+type: entities
+title: Alice — today
+entities:
+  - entity: sensor.wilma_alice_next_lesson
+    name: Next lesson
+  - entity: sensor.wilma_alice_attendance_marks
+    name: Attendance marks this year
+  - entity: calendar.wilma_alice_schedule
 ```
 
 ## Development
 
-### Setup Development Environment
+### Setup
 
-1. Clone the repository
-   ```bash
-   git clone https://github.com/frwickst/wilma-ha
-   cd wilma-ha
-   ```
-
-2. Set up the development environment:
-   ```bash
-   ./scripts/setup.sh
-   ```
-
-3. Activate the virtual environment:
-   ```bash
-   source venv/bin/activate
-   ```
+```bash
+git clone https://github.com/Nornode/ha-wilma-inschool
+cd ha-wilma-inschool
+./scripts/setup.sh
+source .venv/bin/activate
+```
 
 ### Running Tests
-
-This integration includes a comprehensive test suite to ensure functionality:
 
 ```bash
 # Run all tests
 pytest
 
-# Run with coverage report
+# Run with coverage
 pytest --cov=custom_components.wilma
-
-# Run a specific test file
-pytest tests/test_sensor.py
 ```
 
 ### Quality Checks

@@ -26,8 +26,16 @@ ATTR_STUDENT_NAME = "student_name"
 
 SENSOR_LATEST_MESSAGE = "latest_message"
 SENSOR_UNREAD_COUNT = "unread_count"
+SENSOR_NEXT_LESSON = "next_lesson"
+
+BINARY_SENSOR_PROBLEM = "problem"
+SENSOR_ATTENDANCE_COUNT = "attendance_count"
+SENSOR_LATEST_ATTENDANCE = "latest_attendance"
 
 STORAGE_KEY = f"{DOMAIN}_messages"
 STORAGE_VERSION = 1
 
 EVENT_NEW_MESSAGE = "wilma_new_message"
+EVENT_NEW_ATTENDANCE = "wilma_new_attendance_mark"
+
+SCHEDULE_WEEKS_AHEAD = 4  # number of weeks to fetch for the calendar

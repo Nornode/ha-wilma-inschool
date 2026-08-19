@@ -1,0 +1,67 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Yhdistä Wilmaan",
+        "description": "Määritä Wilma-integraatio viestien käyttöä varten.",
+        "data": {
+          "server_url": "Wilma-palvelimen osoite (esim. https://espoo.inschool.fi)",
+          "username": "Käyttäjätunnus",
+          "password": "Salasana"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Yhteyden muodostaminen Wilmaan epäonnistui",
+      "invalid_auth": "Virheellinen käyttäjätunnus tai salasana",
+      "unknown": "Odottamaton virhe"
+    },
+    "abort": {
+      "already_configured": "Tämä Wilma-tili on jo määritetty"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Wilma-asetukset",
+        "data": {
+          "scan_interval_minutes": "Päivitysväli (minuutteina)",
+          "only_unread": "Hae vain lukemattomat viestit",
+          "no_message_content_fetch_limit": "Poista viestin sisältöhaun raja"
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "problem": {
+        "name": "Ongelma"
+      }
+    },
+    "sensor": {
+      "latest_message": {
+        "name": "Viimeisin viesti"
+      },
+      "unread_count": {
+        "name": "Lukemattomat viestit"
+      },
+      "last_update": {
+        "name": "Viimeisin päivitys"
+      },
+      "next_lesson": {
+        "name": "Seuraava tunti"
+      },
+      "attendance_count": {
+        "name": "Tuntimerkinnät"
+      },
+      "latest_attendance": {
+        "name": "Viimeisin tuntimerkintä"
+      }
+    },
+    "calendar": {
+      "schedule": {
+        "name": "Lukujärjestys"
+      }
+    }
+  }
+}

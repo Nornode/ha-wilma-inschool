@@ -1,46 +1,34 @@
 # Wilma for Home Assistant
 
-A Home Assistant integration for the Wilma school platform, providing access to your messages.
+A Home Assistant integration for the [Wilma](https://www.vismasolutions.com/fi/produkter/wilma/) school platform. Monitor your children's school day directly from Home Assistant.
 
 ## Features
 
-- Polls Wilma for new messages every 15 minutes
-- Provides sensors for:
-  - Latest message
-  - Latest unread message
-  - Last update time
-- Stores message content for access by automations
-- Perfect for creating AI-powered notification workflows
+- **Multi-student support** — a separate HA device per child, named _Wilma {First name}_
+- **Messages** — polls for new messages and fires a `wilma_new_message` event on each new one
+- **Schedule & Calendar** — fetches the weekly timetable; provides a native HA calendar entity and a _Next Lesson_ sensor per student
+- **Attendance** — full school-year attendance history with unexplained mark count and a `wilma_new_attendance_mark` event
+- **Multilingual** — UI translated to English, Finnish and Swedish
 
-## Usage
+## Quick Start
 
-After installation, add the integration through the Home Assistant UI:
-1. Go to Configuration → Integrations → Add Integration
-2. Search for "Wilma" and follow the setup process
-3. Enter your Wilma server URL, username, and password
+1. Add the integration via **Settings → Devices & Services → Add Integration → Wilma**.
+2. Enter your Wilma server URL (e.g. `https://espoo.inschool.fi`), username and password.
+3. Done — one device per student appears automatically.
 
-## Example Automation for AI Summarization
+## Example Automation
 
 ```yaml
 automation:
-  - alias: "Summarize new Wilma message"
+  - alias: "Wilma — new message"
     trigger:
-      platform: state
-      entity_id: sensor.latest_message
+      platform: event
+      event_type: wilma_new_message
     action:
-      - service: conversation.process
+      - service: notify.mobile_app_your_phone
         data:
-          agent_id: homeassistant
-          text: >
-            Summarize this message concisely: {{ state_attr('sensor.latest_message', 'content_markdown') }}
-      - service: notify.mobile_app
-        data:
-          title: "Wilma Message Summary"
-          message: "{{ conversation.agent_response.response.speech.plain.text }}"
+          title: "{{ trigger.event.data.sender }}"
+          message: "{{ trigger.event.data.subject }}"
 ```
 
-## Troubleshooting
-
-- Check Home Assistant logs for any error messages
-- Verify your Wilma credentials and server URL
-- For support, open an issue on GitHub
+See the [README](https://github.com/Nornode/ha-wilma-inschool#readme) for full documentation and more automation examples.

@@ -133,3 +133,6 @@ dmypy.json
 
 # Home Assistant
 .homeassistant
+
+# Local helper scripts with hardcoded credentials
+scripts/*.local.sh

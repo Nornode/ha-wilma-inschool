@@ -1,8 +1,9 @@
 """DataUpdateCoordinator for the Wilma integration."""
 
+import json
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from bs4 import BeautifulSoup
@@ -22,7 +23,9 @@ from .const import (
     DEFAULT_NO_MESSAGE_CONTENT_FETCH_LIMIT,
     DEFAULT_ONLY_UNREAD,
     DOMAIN,
+    EVENT_NEW_ATTENDANCE,
     EVENT_NEW_MESSAGE,
+    SCHEDULE_WEEKS_AHEAD,
     STORAGE_KEY,
     STORAGE_VERSION,
 )
@@ -66,6 +69,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
         self.store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}_{entry_id}")
         self.last_update_success_time = None
         self.student_profiles: list[dict[str, str]] = []
+        self.last_fetch_errors: list[str] = []
 
     @property
     def only_unread(self) -> bool:
@@ -146,11 +150,15 @@ class WilmaCoordinator(DataUpdateCoordinator):
             headers = {"Wilma2SID": self.client._sid or ""}
             async with session.get(self.client.base_url, headers=headers) as response:
                 if response.status != 200:
+                    self.last_fetch_errors.append(
+                        f"Home page returned HTTP {response.status}"
+                    )
                     return [{"id": default_id, "name": self.username}] if default_id else []
 
                 html = await response.text()
         except Exception as err:  # pragma: no cover - network issues are environment-specific
             _LOGGER.debug("Could not discover student IDs from home page: %s", err)
+            self.last_fetch_errors.append(f"Student discovery failed: {err}")
             return [{"id": default_id, "name": self.username}] if default_id else []
 
         soup = BeautifulSoup(html, "html.parser")
@@ -239,8 +247,269 @@ class WilmaCoordinator(DataUpdateCoordinator):
 
         return merged, new_messages
 
+    @staticmethod
+    def _parse_schedule_html(
+        html: str, student_id: str, student_name: str
+    ) -> list[dict[str, Any]]:
+        """Extract and parse eventsJSON from a schedule page."""
+        m = re.search(r"var\s+eventsJSON\s*=\s*(\{.+\})\s*;", html, re.DOTALL)
+        if not m:
+            return []
+        raw = m.group(1)
+        # Convert JS object literal unquoted keys to JSON.
+        # The pattern matches either a complete quoted string (to leave it alone)
+        # or an unquoted identifier followed by ':' (to quote the key).
+        _KEY_RE = re.compile(r'("(?:[^"\\]|\\.)*")|(?<!["\w])([A-Za-z_]\w*)\s*:')
+
+        def _fix_key(match: re.Match) -> str:
+            if match.group(1):
+                return match.group(1)  # already-quoted string — return as-is
+            return f'"{match.group(2)}":'
+
+        raw_json = _KEY_RE.sub(_fix_key, raw)
+        try:
+            data = json.loads(raw_json)
+        except json.JSONDecodeError as err:
+            _LOGGER.debug("Failed to parse schedule eventsJSON for %s: %s", student_id, err)
+            return []
+
+        events: list[dict[str, Any]] = []
+        for raw_event in data.get("Events", []):
+            try:
+                text_obj = raw_event.get("Text") or {}
+                subject = text_obj.get("0", "") if isinstance(text_obj, dict) else ""
+                long_text_obj = raw_event.get("LongText") or {}
+                subject_long = long_text_obj.get("0", "") if isinstance(long_text_obj, dict) else ""
+
+                rooms_obj = raw_event.get("Huoneet") or {}
+                room_raw = rooms_obj.get("0", "") if isinstance(rooms_obj, dict) else ""
+                room = room_raw.removeprefix("H: ").strip() if room_raw else ""
+
+                # Teacher names from first occurrence group in OpeInfo
+                ope_info = raw_event.get("OpeInfo") or {}
+                first_occ = ope_info.get("0", {}) if isinstance(ope_info, dict) else {}
+                teachers = [
+                    td["nimi"]
+                    for td in (first_occ.values() if isinstance(first_occ, dict) else [])
+                    if isinstance(td, dict) and td.get("nimi")
+                ]
+
+                events.append({
+                    "id": str(raw_event.get("Id", "")),
+                    "date": raw_event.get("Date", ""),
+                    "start_minutes": int(raw_event.get("Start", 0)),
+                    "end_minutes": int(raw_event.get("End", 0)),
+                    "subject": subject,
+                    "subject_long": subject_long,
+                    "room": room,
+                    "teachers": teachers,
+                    "color": raw_event.get("Color", ""),
+                    "type": raw_event.get("Tyyppi", ""),
+                    "student_id": student_id,
+                    "student_name": student_name,
+                })
+            except (KeyError, TypeError, ValueError) as err:
+                _LOGGER.debug("Error parsing schedule event: %s", err)
+
+        return events
+
+    async def _fetch_schedule_for_student(
+        self, student_id: str, for_date: date | None = None
+    ) -> list[dict[str, Any]]:
+        """Fetch one week of schedule for a student."""
+        if not self.client:
+            return []
+        student_name = next(
+            (p["name"] for p in self.student_profiles if p["id"] == student_id),
+            self.username,
+        )
+        try:
+            session = await self.client._ensure_session()
+            headers = {"Wilma2SID": self.client._sid or ""}
+            path = f"{student_id.lstrip('/')}/schedule"
+            if for_date:
+                path += f"?date={for_date.strftime('%d.%m.%Y')}"
+            url = f"{self.server_url.rstrip('/')}/{path}"
+            async with session.get(url, headers=headers) as resp:
+                if resp.status != 200:
+                    self.last_fetch_errors.append(
+                        f"Schedule for {student_id} returned HTTP {resp.status}"
+                    )
+                    return []
+                html = await resp.text()
+            return self._parse_schedule_html(html, student_id, student_name)
+        except Exception as err:
+            _LOGGER.debug("Error fetching schedule for %s: %s", student_id, err)
+            self.last_fetch_errors.append(f"Schedule fetch for {student_id} failed: {err}")
+            return []
+
+    @staticmethod
+    def _schedule_sort_key(evt: dict[str, Any]) -> tuple:
+        date_str = evt.get("date", "")
+        try:
+            d = datetime.strptime(date_str, "%d.%m.%Y").date()
+        except ValueError:
+            d = date.min
+        return (d, evt.get("start_minutes", 0))
+
+    @staticmethod
+    def _parse_attendance_view_html(html: str) -> list[dict[str, Any]]:
+        """Parse the full attendance history from /attendance/view.
+
+        Extracts per-lesson marks with date, hour, subject, mark type and teacher
+        from the grid table's cell title attributes and the legend table.
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        tables = soup.find_all("table")
+        if not tables:
+            return []
+
+        # Build CSS-class → mark-type-name lookup from legend (second table)
+        legend: dict[str, str] = {}
+        if len(tables) >= 2:
+            for row in tables[1].find_all("tr"):
+                cells = row.find_all("td")
+                if len(cells) >= 2:
+                    css_classes = cells[0].get("class", [])
+                    label = cells[1].get_text(strip=True)
+                    for cls in css_classes:
+                        if cls.startswith("at-tp"):
+                            legend[cls] = label
+
+        # Parse the grid table header to map column index → lesson hour
+        grid = tables[0]
+        header_row = grid.find("tr")
+        if not header_row:
+            return []
+
+        # Build col_index → hour, accounting for colspan
+        col_to_hour: list[str] = []
+        for th in header_row.find_all("th"):
+            text = th.get_text(strip=True)
+            span = int(th.get("colspan", 1))
+            col_to_hour.extend([text] * span)
+
+        # col 0 = day-name (part of "Päivämäärä"), col 1 = date
+        marks: list[dict[str, Any]] = []
+        for row in grid.find_all("tr")[1:]:
+            cells = row.find_all(["td", "th"])
+            if not cells:
+                continue
+
+            day = cells[0].get_text(strip=True) if len(cells) > 0 else ""
+            date_str = cells[1].get_text(strip=True) if len(cells) > 1 else ""
+            if not date_str:
+                continue
+
+            # Walk remaining cells, tracking column position
+            col_idx = 2  # first two cols consumed by day+date
+            for cell in cells[2:]:
+                span = int(cell.get("colspan", 1))
+                css_classes = cell.get("class", [])
+                title = cell.get("title", "")
+
+                if "event" in css_classes and title:
+                    # title format: "{SubjectCode}; {MarkTypeName} /{TeacherName}"
+                    mark_type_name = ""
+                    subject_code = ""
+                    teacher = ""
+                    parts = title.split(";", 1)
+                    if parts:
+                        subject_code = parts[0].strip()
+                    if len(parts) > 1:
+                        rest = parts[1].strip()
+                        if "/" in rest:
+                            type_part, teacher = rest.rsplit("/", 1)
+                            mark_type_name = type_part.strip()
+                        else:
+                            mark_type_name = rest
+
+                    # Resolve mark type from legend CSS class
+                    legend_name = next(
+                        (legend[c] for c in css_classes if c in legend), mark_type_name
+                    )
+
+                    # Determine lesson hour from column index
+                    hour = col_to_hour[col_idx] if col_idx < len(col_to_hour) else ""
+
+                    mark_id = f"{date_str}|{hour}|{subject_code}"
+                    marks.append({
+                        "date": date_str,
+                        "day": day,
+                        "lesson_hour": hour,
+                        "subject_code": subject_code,
+                        "mark_type": legend_name or mark_type_name,
+                        "teacher": teacher.strip(),
+                        "teacher_initials": cell.get_text(strip=True),
+                        "_id": mark_id,
+                    })
+
+                col_idx += span
+
+        # Return newest first (rows are newest-first in Wilma HTML)
+        return marks
+
+    @staticmethod
+    def _parse_attendance_unexplained_html(html: str) -> list[dict[str, Any]]:
+        """Parse marks that still need explanation from the plain /attendance page."""
+        soup = BeautifulSoup(html, "html.parser")
+        table = soup.find("table")
+        if not table:
+            return []
+        header_row = table.find("tr")
+        if not header_row:
+            return []
+        headers = [th.get_text(strip=True) for th in header_row.find_all(["th", "td"])]
+        marks: list[dict[str, Any]] = []
+        for row in table.find_all("tr")[1:]:
+            cells = row.find_all(["td", "th"])
+            if not cells:
+                continue
+            mark: dict[str, Any] = {}
+            for i, cell in enumerate(cells):
+                key = headers[i] if i < len(headers) else f"col_{i}"
+                link = cell.find("a")
+                mark[key] = cell.get_text(strip=True)
+                if link and link.get("href"):
+                    mark[f"{key}_href"] = link["href"]
+            raw_id = "|".join(str(mark.get(h, "")) for h in headers[:4])
+            mark["_id"] = raw_id
+            marks.append(mark)
+        return marks
+
+    async def _fetch_attendance_for_student(
+        self, student_id: str
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Return (all_marks, unexplained_marks) for one student."""
+        if not self.client:
+            return [], []
+        try:
+            session = await self.client._ensure_session()
+            h = {"Wilma2SID": self.client._sid or ""}
+            base = self.server_url.rstrip("/")
+            uid = student_id.lstrip("/")
+            year = dt_util.now().year
+
+            # Full history view
+            view_url = f"{base}/{uid}/attendance/view?range=-3&first=01.01.{year}&last=31.12.{year}"
+            async with session.get(view_url, headers=h) as resp:
+                view_html = await resp.text() if resp.status == 200 else ""
+
+            # Unexplained marks
+            unexplained_url = f"{base}/{uid}/attendance"
+            async with session.get(unexplained_url, headers=h) as resp:
+                unexplained_html = await resp.text() if resp.status == 200 else ""
+
+            all_marks = self._parse_attendance_view_html(view_html) if view_html else []
+            unexplained = self._parse_attendance_unexplained_html(unexplained_html) if unexplained_html else []
+            return all_marks, unexplained
+        except Exception as err:
+            _LOGGER.debug("Error fetching attendance for %s: %s", student_id, err)
+            return [], []
+
     async def _async_update_data(self):
         """Fetch data from Wilma."""
+        self.last_fetch_errors = []
         data = await self.store.async_load() or {}
         stored_students = data.get("students", {})
         if not isinstance(stored_students, dict):
@@ -304,6 +573,46 @@ class WilmaCoordinator(DataUpdateCoordinator):
 
             await self.store.async_save({"students": updated_students})
 
+            # Fetch schedules for the upcoming weeks for each student
+            today = dt_util.now().date()
+            week_dates = [today + timedelta(weeks=i) for i in range(SCHEDULE_WEEKS_AHEAD)]
+            schedules: dict[str, list[dict[str, Any]]] = {}
+            for student in self.student_profiles:
+                student_id = student["id"]
+                seen_ids: dict[str, dict[str, Any]] = {}
+                for week_date in week_dates:
+                    for evt in await self._fetch_schedule_for_student(student_id, week_date):
+                        seen_ids[evt["id"]] = evt
+                schedules[student_id] = sorted(seen_ids.values(), key=self._schedule_sort_key)
+
+            # Fetch attendance marks for each student
+            prev_attendance: dict[str, set[str]] = {
+                p["id"]: set(
+                    m["_id"]
+                    for m in (self.data or {}).get("attendance", {}).get(p["id"], [])
+                )
+                for p in self.student_profiles
+            }
+            attendance: dict[str, list[dict[str, Any]]] = {}
+            unexplained: dict[str, list[dict[str, Any]]] = {}
+            for student in self.student_profiles:
+                student_id = student["id"]
+                all_marks, unexplained_marks = await self._fetch_attendance_for_student(student_id)
+                attendance[student_id] = all_marks
+                unexplained[student_id] = unexplained_marks
+                # Fire event for each new mark in the full history
+                for mark in all_marks:
+                    mark_id = mark.get("_id", "")
+                    if mark_id and mark_id not in prev_attendance.get(student_id, set()):
+                        self.hass.bus.async_fire(
+                            EVENT_NEW_ATTENDANCE,
+                            {
+                                "student_id": student_id,
+                                "student_name": student.get("name", ""),
+                                "mark": {k: v for k, v in mark.items() if not k.startswith("_")},
+                            },
+                        )
+
             # Update last successful update time
             self.last_update_success_time = dt_util.utcnow()
 
@@ -332,6 +641,9 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 "unread_count": sum(unread_count_by_student.values()),
                 "unread_count_by_student": unread_count_by_student,
                 "last_update": dt_util.as_local(self.last_update_success_time),
+                "schedules": schedules,
+                "attendance": attendance,
+                "unexplained_attendance": unexplained,
             }
 
         except AuthenticationError as err:

@@ -1,0 +1,67 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Anslut till Wilma",
+        "description": "Konfigurera Wilma-integrationen för att komma åt dina meddelanden.",
+        "data": {
+          "server_url": "Wilma-serveradress (t.ex. https://espoo.inschool.fi)",
+          "username": "Användarnamn",
+          "password": "Lösenord"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Kunde inte ansluta till Wilma",
+      "invalid_auth": "Ogiltigt användarnamn eller lösenord",
+      "unknown": "Oväntat fel"
+    },
+    "abort": {
+      "already_configured": "Det här Wilma-kontot är redan konfigurerat"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Wilma-inställningar",
+        "data": {
+          "scan_interval_minutes": "Uppdateringsintervall (minuter)",
+          "only_unread": "Hämta endast olästa meddelanden",
+          "no_message_content_fetch_limit": "Inaktivera gräns för hämtning av meddelandeinnehåll"
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "problem": {
+        "name": "Problem"
+      }
+    },
+    "sensor": {
+      "latest_message": {
+        "name": "Senaste meddelande"
+      },
+      "unread_count": {
+        "name": "Olästa meddelanden"
+      },
+      "last_update": {
+        "name": "Senaste uppdatering"
+      },
+      "next_lesson": {
+        "name": "Nästa lektion"
+      },
+      "attendance_count": {
+        "name": "Lektionsanmärkningar"
+      },
+      "latest_attendance": {
+        "name": "Senaste lektionsanmärkning"
+      }
+    },
+    "calendar": {
+      "schedule": {
+        "name": "Schema"
+      }
+    }
+  }
+}

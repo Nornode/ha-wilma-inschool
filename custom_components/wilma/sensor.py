@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+import zoneinfo
+from datetime import datetime, time as dt_time
 from typing import Any, Dict, Optional
 
 from homeassistant.components.sensor import (
@@ -29,7 +30,10 @@ from .const import (
     ATTR_SUBJECT,
     ATTR_TIMESTAMP,
     DOMAIN,
+    SENSOR_ATTENDANCE_COUNT,
+    SENSOR_LATEST_ATTENDANCE,
     SENSOR_LATEST_MESSAGE,
+    SENSOR_NEXT_LESSON,
     SENSOR_UNREAD_COUNT,
 )
 from .coordinator import WilmaCoordinator
@@ -98,6 +102,45 @@ async def async_setup_entry(
                 student_name,
             )
         )
+        entities.append(
+            WilmaNextLessonSensor(
+                coordinator,
+                SensorEntityDescription(
+                    key=SENSOR_NEXT_LESSON,
+                    name="Next Lesson",
+                    icon="mdi:school",
+                ),
+                entry,
+                student_id,
+                student_name,
+            )
+        )
+        entities.append(
+            WilmaAttendanceCountSensor(
+                coordinator,
+                SensorEntityDescription(
+                    key=SENSOR_ATTENDANCE_COUNT,
+                    name="Attendance Marks",
+                    icon="mdi:clipboard-alert",
+                ),
+                entry,
+                student_id,
+                student_name,
+            )
+        )
+        entities.append(
+            WilmaLatestAttendanceSensor(
+                coordinator,
+                SensorEntityDescription(
+                    key=SENSOR_LATEST_ATTENDANCE,
+                    name="Latest Attendance Mark",
+                    icon="mdi:clipboard-clock",
+                ),
+                entry,
+                student_id,
+                student_name,
+            )
+        )
 
     async_add_entities(entities)
 
@@ -118,11 +161,13 @@ class WilmaBaseStudentSensor(CoordinatorEntity, SensorEntity):
         self.entity_description = description
         self._student_id = student_id
         self._student_name = student_name
+        first_name = student_name.split()[0] if student_name else student_name
         self._attr_unique_id = f"{entry.entry_id}_{student_id}_{description.key}"
-        self._attr_name = f"{student_name} {description.name}"
+        self._attr_has_entity_name = True
+        self._attr_translation_key = description.key
         self._attr_device_info = {
             "identifiers": {(DOMAIN, f"{entry.entry_id}_{student_id}")},
-            "name": f"Wilma {student_name}",
+            "name": f"Wilma {first_name}",
             "manufacturer": "Visma",
             "model": "Wilma",
             "sw_version": "1.0.0",
@@ -227,11 +272,13 @@ class WilmaLastUpdateSensor(CoordinatorEntity, SensorEntity):
         self.entity_description = description
         self._student_id = student_id
         self._student_name = student_name
+        first_name = student_name.split()[0] if student_name else student_name
         self._attr_unique_id = f"{entry.entry_id}_{student_id}_{description.key}"
-        self._attr_name = f"{student_name} {description.name}"
+        self._attr_has_entity_name = True
+        self._attr_translation_key = description.key
         self._attr_device_info = {
             "identifiers": {(DOMAIN, f"{entry.entry_id}_{student_id}")},
-            "name": f"Wilma {student_name}",
+            "name": f"Wilma {first_name}",
             "manufacturer": "Visma",
             "model": "Wilma",
             "sw_version": "1.0.0",
@@ -253,3 +300,117 @@ class WilmaLastUpdateSensor(CoordinatorEntity, SensorEntity):
         if self.coordinator.last_update_success_time:
             return dt_util.as_local(self.coordinator.last_update_success_time)
         return None
+
+
+class WilmaNextLessonSensor(WilmaBaseStudentSensor):
+    """Sensor showing the next upcoming school lesson for one student."""
+
+    @property
+    def native_value(self) -> str | None:
+        lesson = self._next_lesson()
+        return lesson.get("subject") if lesson else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        attrs = super().extra_state_attributes or {}
+        lesson = self._next_lesson()
+        if not lesson:
+            return attrs
+
+        date_str = lesson.get("date", "")
+        start_min = int(lesson.get("start_minutes", 0))
+        end_min = int(lesson.get("end_minutes", 0))
+        start_iso = end_iso = None
+        try:
+            d = datetime.strptime(date_str, "%d.%m.%Y").date()
+            tz = zoneinfo.ZoneInfo(self.coordinator.hass.config.time_zone)
+            start_iso = datetime.combine(d, dt_time(start_min // 60, start_min % 60), tzinfo=tz).isoformat()
+            end_iso = datetime.combine(d, dt_time(end_min // 60, end_min % 60), tzinfo=tz).isoformat()
+        except ValueError:
+            pass
+
+        attrs.update({
+            "date": date_str,
+            "start_time": start_iso,
+            "end_time": end_iso,
+            "room": lesson.get("room"),
+            "teachers": lesson.get("teachers"),
+            "color": lesson.get("color"),
+            "subject_long": lesson.get("subject_long"),
+        })
+        return attrs
+
+    def _next_lesson(self) -> dict[str, Any] | None:
+        if not self.coordinator.data:
+            return None
+        raw_events = self.coordinator.data.get("schedules", {}).get(self._student_id, [])
+        now = dt_util.now()
+        tz = zoneinfo.ZoneInfo(self.coordinator.hass.config.time_zone)
+        for evt in raw_events:
+            date_str = evt.get("date", "")
+            end_min = int(evt.get("end_minutes", 0))
+            try:
+                d = datetime.strptime(date_str, "%d.%m.%Y").date()
+                end_dt = datetime.combine(d, dt_time(end_min // 60, end_min % 60), tzinfo=tz)
+            except ValueError:
+                continue
+            if end_dt > now:
+                return evt
+        return None
+
+
+class WilmaAttendanceCountSensor(WilmaBaseStudentSensor):
+    """Number of attendance marks in the current school year."""
+
+    @property
+    def native_value(self) -> int:
+        return len(self._marks())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        attrs = super().extra_state_attributes or {}
+        marks = self._marks()
+        unexplained = self._unexplained()
+        attrs["unexplained_count"] = len(unexplained)
+        # Count by mark type
+        by_type: dict[str, int] = {}
+        for m in marks:
+            t = m.get("mark_type", "unknown")
+            by_type[t] = by_type.get(t, 0) + 1
+        if by_type:
+            attrs["by_type"] = by_type
+        return attrs
+
+    def _marks(self) -> list[dict[str, Any]]:
+        if not self.coordinator.data:
+            return []
+        return self.coordinator.data.get("attendance", {}).get(self._student_id, [])
+
+    def _unexplained(self) -> list[dict[str, Any]]:
+        if not self.coordinator.data:
+            return []
+        return self.coordinator.data.get("unexplained_attendance", {}).get(self._student_id, [])
+
+
+class WilmaLatestAttendanceSensor(WilmaBaseStudentSensor):
+    """Most recent attendance mark for this student."""
+
+    @property
+    def native_value(self) -> str | None:
+        marks = self._marks()
+        if not marks:
+            return None
+        return marks[0].get("mark_type") or None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        attrs = super().extra_state_attributes or {}
+        marks = self._marks()
+        if marks:
+            attrs.update({k: v for k, v in marks[0].items() if not k.startswith("_")})
+        return attrs
+
+    def _marks(self) -> list[dict[str, Any]]:
+        if not self.coordinator.data:
+            return []
+        return self.coordinator.data.get("attendance", {}).get(self._student_id, [])
