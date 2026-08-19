@@ -25,12 +25,35 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Get version from manifest
         id: version
         run: |
           VERSION=$(python3 -c "import json; print(json.load(open('custom_components/wilma/manifest.json'))['version'])")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Validate tag matches manifest version
+        run: |
+          if [ "${{ github.ref_name }}" != "v${{ steps.version.outputs.version }}" ]; then
+            echo "Tag ${{ github.ref_name }} does not match manifest version v${{ steps.version.outputs.version }}" >&2
+            exit 1
+          fi
+
+      - name: Get release notes from annotated tag
+        run: |
+          : > release-notes.md
+          if git cat-file -e "${{ github.ref_name }}^{tag}" 2>/dev/null; then
+            git tag -l --format='%(contents)' "${{ github.ref_name }}" > release-notes.md
+          fi
+
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            printf '%s\n\n%s\n' \
+              'Release notes were not included in the tag annotation.' \
+              'See the automatically generated notes below for the commit summary.' \
+              > release-notes.md
+          fi
 
       - name: Zip integration
         run: |
@@ -41,6 +64,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: "v${{ steps.version.outputs.version }}"
+          name: ${{ github.ref_name }}
+          body_path: release-notes.md
           generate_release_notes: true
           files: "wilma-${{ steps.version.outputs.version }}.zip"

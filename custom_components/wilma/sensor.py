@@ -34,6 +34,7 @@ from .const import (
     ATTR_SUBJECT,
     ATTR_TIMESTAMP,
     DOMAIN,
+    INTEGRATION_VERSION,
     SENSOR_ATTENDANCE_COUNT,
     SENSOR_LATEST_BULLETIN,
     SENSOR_LATEST_ATTENDANCE,
@@ -204,7 +205,7 @@ class WilmaBaseStudentSensor(CoordinatorEntity, SensorEntity):
             "name": f"Wilma {first_name}",
             "manufacturer": "Visma",
             "model": "Wilma",
-            "sw_version": "1.0.0",
+            "sw_version": INTEGRATION_VERSION,
         }
 
     @property
@@ -321,8 +322,6 @@ class WilmaLatestBulletinSensor(WilmaBaseStudentSensor):
             }
         )
 
-        if item.get("content_html"):
-            attrs[ATTR_CONTENT] = item.get("content_html")
         if item.get("content_markdown"):
             attrs[ATTR_CONTENT_MARKDOWN] = item.get("content_markdown")
         return attrs
@@ -363,7 +362,7 @@ class WilmaLastUpdateSensor(CoordinatorEntity, SensorEntity):
             "name": f"Wilma {first_name}",
             "manufacturer": "Visma",
             "model": "Wilma",
-            "sw_version": "1.0.0",
+            "sw_version": INTEGRATION_VERSION,
         }
 
     @property

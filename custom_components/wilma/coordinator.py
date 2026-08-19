@@ -37,6 +37,12 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _is_server_auth_rejection(err: AuthenticationError) -> bool:
+    """Return true when Wilma rejects token minting with HTTP 403."""
+    err_text = str(err).lower()
+    return "403" in err_text and "token" in err_text
+
+
 class WilmaCoordinator(DataUpdateCoordinator):
     """Coordinator for fetching data from Wilma."""
 
@@ -696,10 +702,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
 
         try:
             if self.client is None:
-                self.client = WilmaClient(
-                    self.server_url,
-                    session=async_get_clientsession(self.hass),
-                )
+                self.client = WilmaClient(self.server_url)
                 _LOGGER.debug(
                     f"Connecting to Wilma server {self.server_url} as {self.username}"
                 )
@@ -867,6 +870,13 @@ class WilmaCoordinator(DataUpdateCoordinator):
 
         except AuthenticationError as err:
             self.client = None
+            if _is_server_auth_rejection(err):
+                _LOGGER.error(
+                    "Wilma rejected token creation (HTTP 403). Credentials may be valid but login flow was rejected: %s",
+                    err,
+                )
+                raise UpdateFailed("Authentication rejected by Wilma server (HTTP 403)") from err
+
             _LOGGER.error("Authentication to Wilma failed: %s", err)
             raise UpdateFailed("Authentication failed") from err
         except WilmaError as err:

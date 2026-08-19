@@ -14,7 +14,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
+from .const import DOMAIN, INTEGRATION_VERSION
 from .coordinator import WilmaCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ class WilmaCalendarEntity(CoordinatorEntity, CalendarEntity):
             "name": f"Wilma {first_name}",
             "manufacturer": "Visma",
             "model": "Wilma",
-            "sw_version": "1.0.0",
+            "sw_version": INTEGRATION_VERSION,
         }
 
     def _tz(self) -> zoneinfo.ZoneInfo:

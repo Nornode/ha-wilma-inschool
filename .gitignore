@@ -135,6 +135,7 @@ dmypy.json
 .homeassistant
 
 # Local helper scripts with hardcoded credentials
+scripts/deploy.local.sh
 scripts/*.local.sh
 
 # Consolidated local planning note

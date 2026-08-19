@@ -1,8 +1,13 @@
 """Constants for the Wilma integration."""
 
+import json
 from datetime import timedelta
+from pathlib import Path
 
 DOMAIN = "wilma"
+INTEGRATION_VERSION = json.loads(
+    Path(__file__).with_name("manifest.json").read_text(encoding="utf-8")
+)["version"]
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 CONF_SERVER_URL = "server_url"

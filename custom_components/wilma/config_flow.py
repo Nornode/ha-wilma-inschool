@@ -9,7 +9,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import selector
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from wilhelmina import AuthenticationError, WilmaClient, WilmaError
 
 from .const import (
@@ -29,6 +28,12 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+
+def _is_server_auth_rejection(err: AuthenticationError) -> bool:
+    """Return true when Wilma rejects token minting with HTTP 403."""
+    err_text = str(err).lower()
+    return "403" in err_text and "token" in err_text
+
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_SERVER_URL): str,
@@ -44,9 +49,7 @@ async def validate_input(hass: HomeAssistant, data: Dict[str, Any]) -> Dict[str,
     Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
     """
     try:
-        async with WilmaClient(
-            data[CONF_SERVER_URL], session=async_get_clientsession(hass)
-        ) as client:
+        async with WilmaClient(data[CONF_SERVER_URL]) as client:
             await client.login(data[CONF_USERNAME], data[CONF_PASSWORD])
 
             # Test fetching messages
@@ -54,6 +57,13 @@ async def validate_input(hass: HomeAssistant, data: Dict[str, Any]) -> Dict[str,
             _LOGGER.debug(f"Successfully fetched {len(messages)} messages from Wilma")
 
     except AuthenticationError as err:
+        if _is_server_auth_rejection(err):
+            _LOGGER.error(
+                "Wilma rejected token creation (HTTP 403). Credentials may be valid but login flow was rejected: %s",
+                err,
+            )
+            raise AuthRejected from err
+
         _LOGGER.error("Authentication to Wilma failed: %s", err)
         raise InvalidAuth from err
     except WilmaError as err:
@@ -91,6 +101,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_create_entry(title=info["title"], data=user_input)
             except CannotConnect:
                 errors["base"] = "cannot_connect"
+            except AuthRejected:
+                errors["base"] = "auth_rejected"
             except InvalidAuth:
                 errors["base"] = "invalid_auth"
             except Exception:  # pylint: disable=broad-except
@@ -108,6 +120,10 @@ class CannotConnect(HomeAssistantError):
 
 class InvalidAuth(HomeAssistantError):
     """Error to indicate there is invalid auth."""
+
+
+class AuthRejected(HomeAssistantError):
+    """Error to indicate Wilma rejected token authentication."""
 
 
 class WilmaOptionsFlow(config_entries.OptionsFlow):

@@ -13,7 +13,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import BINARY_SENSOR_PROBLEM, DOMAIN
+from .const import BINARY_SENSOR_PROBLEM, DOMAIN, INTEGRATION_VERSION
 from .coordinator import WilmaCoordinator
 
 _PROBLEM_DESCRIPTION = BinarySensorEntityDescription(
@@ -48,7 +48,7 @@ class WilmaProblemBinarySensor(CoordinatorEntity, BinarySensorEntity):
             "name": "Wilma",
             "manufacturer": "Visma",
             "model": "Wilma",
-            "sw_version": "1.0.0",
+            "sw_version": INTEGRATION_VERSION,
         }
 
     @property

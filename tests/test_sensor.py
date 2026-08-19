@@ -62,7 +62,7 @@ async def test_sensors_state(hass: HomeAssistant, mock_setup_integration):
     assert state is not None
     assert state.state == "Kid One latest bulletin"
     assert state.attributes[ATTR_NEWS_ID] == 101
-    assert state.attributes[ATTR_CONTENT] == "<h1>Kid One latest bulletin</h1>\n<p>Line one for kid one.</p>\n<p><strong>Important</strong> update with a <a href=\"https://example.com\">link</a>.</p>"
+    assert ATTR_CONTENT not in state.attributes
     assert "Line one for kid one." in state.attributes[ATTR_CONTENT_MARKDOWN]
     assert "[link](https://example.com)" in state.attributes[ATTR_CONTENT_MARKDOWN]
 
