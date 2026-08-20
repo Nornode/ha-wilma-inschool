@@ -25,8 +25,6 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-MANIFEST="custom_components/wilma/manifest.json"
-
 die() {
   echo "Error: $*" >&2
   exit 1
@@ -48,9 +46,21 @@ prompt_default() {
 need git
 need python3
 
-VERSION="$(python3 - <<'PY'
+MANIFEST_CANDIDATES=()
+while IFS= read -r manifest; do
+  MANIFEST_CANDIDATES+=("$manifest")
+done < <(find custom_components -mindepth 2 -maxdepth 2 -type f -name manifest.json -print | sort)
+
+if [ "${#MANIFEST_CANDIDATES[@]}" -ne 1 ]; then
+  die "Expected exactly one custom integration manifest under custom_components; found ${#MANIFEST_CANDIDATES[@]}"
+fi
+MANIFEST="${MANIFEST_CANDIDATES[0]}"
+
+VERSION="$(python3 - "$MANIFEST" <<'PY'
 import json
-with open("custom_components/wilma/manifest.json", encoding="utf-8") as manifest:
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as manifest:
     print(json.load(manifest)["version"])
 PY
 )"
