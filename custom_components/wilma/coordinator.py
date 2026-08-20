@@ -811,9 +811,10 @@ class WilmaCoordinator(DataUpdateCoordinator):
 
             await self.store.async_save({"students": updated_students, "news": updated_news})
 
-            # Fetch schedules for the upcoming weeks for each student
+            # Fetch schedules for the current week and upcoming weeks for each student.
             today = dt_util.now().date()
-            week_dates = [today + timedelta(weeks=i) for i in range(SCHEDULE_WEEKS_AHEAD)]
+            current_week = today - timedelta(days=today.weekday())
+            week_dates = [current_week + timedelta(weeks=i) for i in range(SCHEDULE_WEEKS_AHEAD)]
             schedules: dict[str, list[dict[str, Any]]] = {}
             for student in self.student_profiles:
                 student_id = student["id"]

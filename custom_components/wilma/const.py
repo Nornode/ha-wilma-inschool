@@ -52,4 +52,4 @@ EVENT_NEW_MESSAGE = "wilma_new_message"
 EVENT_NEW_ATTENDANCE = "wilma_new_attendance_mark"
 EVENT_NEW_BULLETIN = "wilma_new_bulletin"
 
-SCHEDULE_WEEKS_AHEAD = 4  # number of weeks to fetch for the calendar
+SCHEDULE_WEEKS_AHEAD = 2  # current week plus next week
