@@ -13,7 +13,7 @@ from custom_components.wilma.const import (
 )
 
 
-async def test_form(hass, mock_wilma_flow_client):
+async def test_form(hass, mock_wilma_flow_client, mock_wilma_client):
     """Test we get the form."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
@@ -87,7 +87,7 @@ async def test_form_auth_rejected(hass):
     assert result["errors"] == {"base": "auth_rejected"}
 
 
-async def test_duplicate_entries(hass, mock_wilma_flow_client):
+async def test_duplicate_entries(hass, mock_wilma_flow_client, mock_wilma_client):
     """Test handling of duplicate entries."""
     # Add existing entry
     entry = MockConfigEntry(
