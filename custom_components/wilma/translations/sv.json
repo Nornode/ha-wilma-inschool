@@ -30,6 +30,7 @@
           "scan_interval_minutes": "Uppdateringsintervall (minuter)",
           "only_unread": "Hämta endast olästa meddelanden",
           "no_message_content_fetch_limit": "Inaktivera gräns för hämtning av meddelandeinnehåll",
+          "recent_threshold_hours": "Tidsfönster för senaste aktivitet (timmar)",
           "language": "Wilma-språk"
         }
       }
@@ -39,6 +40,15 @@
     "binary_sensor": {
       "problem": {
         "name": "Problem"
+      },
+      "recent_message": {
+        "name": "Senaste meddelande (nytt)"
+      },
+      "recent_bulletin": {
+        "name": "Senaste bulletin (ny)"
+      },
+      "recent_attendance": {
+        "name": "Senaste lektionsanmärkning (ny)"
       }
     },
     "sensor": {

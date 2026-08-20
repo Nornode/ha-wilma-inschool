@@ -15,12 +15,14 @@ CONF_SCAN_INTERVAL_MINUTES = "scan_interval_minutes"
 CONF_ONLY_UNREAD = "only_unread"
 CONF_NO_MESSAGE_CONTENT_FETCH_LIMIT = "no_message_content_fetch_limit"
 CONF_LANGUAGE = "language"
+CONF_RECENT_THRESHOLD_HOURS = "recent_threshold_hours"
 
 DEFAULT_SCAN_INTERVAL = timedelta(minutes=30)
 DEFAULT_SCAN_INTERVAL_MINUTES = 30
 DEFAULT_ONLY_UNREAD = False
 DEFAULT_NO_MESSAGE_CONTENT_FETCH_LIMIT = False
 DEFAULT_LANGUAGE = "1"  # Finnish
+DEFAULT_RECENT_THRESHOLD_HOURS = 24
 
 ATTR_CONTENT = "content"
 ATTR_CONTENT_MARKDOWN = "content_markdown"
@@ -42,8 +44,12 @@ SENSOR_LATEST_BULLETIN = "latest_bulletin"
 SENSOR_UNREAD_BULLETIN_COUNT = "unread_bulletin_count"
 
 BINARY_SENSOR_PROBLEM = "problem"
+BINARY_SENSOR_RECENT_MESSAGE = "recent_message"
+BINARY_SENSOR_RECENT_BULLETIN = "recent_bulletin"
+BINARY_SENSOR_RECENT_ATTENDANCE = "recent_attendance"
 SENSOR_ATTENDANCE_COUNT = "attendance_count"
 SENSOR_LATEST_ATTENDANCE = "latest_attendance"
+SENSOR_LAST_HTTP_STATUS = "last_http_status"
 
 STORAGE_KEY = f"{DOMAIN}_messages"
 STORAGE_VERSION = 1

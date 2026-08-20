@@ -16,12 +16,14 @@ from .const import (
     CONF_NO_MESSAGE_CONTENT_FETCH_LIMIT,
     CONF_ONLY_UNREAD,
     CONF_PASSWORD,
+    CONF_RECENT_THRESHOLD_HOURS,
     CONF_SCAN_INTERVAL_MINUTES,
     CONF_SERVER_URL,
     CONF_USERNAME,
     DEFAULT_LANGUAGE,
     DEFAULT_NO_MESSAGE_CONTENT_FETCH_LIMIT,
     DEFAULT_ONLY_UNREAD,
+    DEFAULT_RECENT_THRESHOLD_HOURS,
     DEFAULT_SCAN_INTERVAL_MINUTES,
     DOMAIN,
 )
@@ -174,6 +176,10 @@ class WilmaOptionsFlow(config_entries.OptionsFlow):
                         DEFAULT_NO_MESSAGE_CONTENT_FETCH_LIMIT,
                     ),
                 ): bool,
+                vol.Optional(
+                    CONF_RECENT_THRESHOLD_HOURS,
+                    default=options.get(CONF_RECENT_THRESHOLD_HOURS, DEFAULT_RECENT_THRESHOLD_HOURS),
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=168)),
                 vol.Optional(
                     CONF_LANGUAGE,
                     default=options.get(CONF_LANGUAGE, DEFAULT_LANGUAGE),

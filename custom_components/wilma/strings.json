@@ -29,7 +29,8 @@
         "data": {
           "scan_interval_minutes": "Polling interval (minutes)",
           "only_unread": "Fetch only unread messages",
-          "no_message_content_fetch_limit": "Disable full-content fetch limit"
+          "no_message_content_fetch_limit": "Disable full-content fetch limit",
+          "recent_threshold_hours": "Recent activity window (hours)"
         }
       }
     }
@@ -38,6 +39,15 @@
     "binary_sensor": {
       "problem": {
         "name": "Problem"
+      },
+      "recent_message": {
+        "name": "Recent Message"
+      },
+      "recent_bulletin": {
+        "name": "Recent Bulletin"
+      },
+      "recent_attendance": {
+        "name": "Recent Attendance Mark"
       }
     },
     "sensor": {

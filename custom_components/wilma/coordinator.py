@@ -80,6 +80,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
         self.last_update_success_time = None
         self.student_profiles: list[dict[str, str]] = []
         self.last_fetch_errors: list[str] = []
+        self.last_http_status: int | None = None
 
     @property
     def only_unread(self) -> bool:
@@ -227,6 +228,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
             headers = {"Wilma2SID": self.client._sid or ""}
             full_url = f"{self.server_url.rstrip('/')}/{str(url).lstrip('/')}"
             async with session.get(self._url_with_lang(full_url), headers=headers) as resp:
+                self.last_http_status = resp.status
                 if resp.status != 200:
                     self.last_fetch_errors.append(
                         f"News article for {student_id} returned HTTP {resp.status}"
@@ -273,6 +275,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
             session = await self.client._ensure_session()
             headers = {"Wilma2SID": self.client._sid or ""}
             async with session.get(self._url_with_lang(self.client.base_url), headers=headers) as response:
+                self.last_http_status = response.status
                 if response.status != 200:
                     self.last_fetch_errors.append(
                         f"Home page returned HTTP {response.status}"
@@ -352,6 +355,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
             headers = {"Wilma2SID": self.client._sid or ""}
             url = f"{self.server_url.rstrip('/')}/{student_id.lstrip('/')}/news"
             async with session.get(self._url_with_lang(url), headers=headers) as resp:
+                self.last_http_status = resp.status
                 if resp.status != 200:
                     self.last_fetch_errors.append(
                         f"News for {student_id} returned HTTP {resp.status}"
@@ -409,6 +413,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
     def _merge_news(
         existing_news: list[dict[str, Any]],
         fetched_news: list[dict[str, Any]],
+        now_iso: str | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Merge bulletin lists and deduplicate by news id."""
         existing_by_id = {
@@ -422,6 +427,8 @@ class WilmaCoordinator(DataUpdateCoordinator):
             news_id = item.get("news_id")
             if news_id is None:
                 continue
+            if news_id not in existing_ids and now_iso:
+                item.setdefault("fetched_at", now_iso)
             existing_by_id[news_id] = item
 
         merged = sorted(existing_by_id.values(), key=WilmaCoordinator._news_sort_key, reverse=True)
@@ -513,6 +520,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 path += f"?date={for_date.strftime('%d.%m.%Y')}"
             url = f"{self.server_url.rstrip('/')}/{path}"
             async with session.get(self._url_with_lang(url), headers=headers) as resp:
+                self.last_http_status = resp.status
                 if resp.status != 200:
                     self.last_fetch_errors.append(
                         f"Schedule for {student_id} returned HTTP {resp.status}"
@@ -702,11 +710,13 @@ class WilmaCoordinator(DataUpdateCoordinator):
             # Full history view
             view_url = f"{base}/{uid}/attendance/view?range=-3&first=01.01.{year}&last=31.12.{year}"
             async with session.get(self._url_with_lang(view_url), headers=h) as resp:
+                self.last_http_status = resp.status
                 view_html = await resp.text() if resp.status == 200 else ""
 
             # Unexplained marks
             unexplained_url = f"{base}/{uid}/attendance"
             async with session.get(self._url_with_lang(unexplained_url), headers=h) as resp:
+                self.last_http_status = resp.status
                 unexplained_html = await resp.text() if resp.status == 200 else ""
 
             all_marks = self._parse_attendance_view_html(view_html) if view_html else []
@@ -783,7 +793,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
                         )
 
                 fetched_news = await self._fetch_news_for_student(student_id)
-                merged_news, new_news = self._merge_news(existing_news, fetched_news)
+                merged_news, new_news = self._merge_news(existing_news, fetched_news, dt_util.utcnow().isoformat())
 
                 if merged_news:
                     merged_news[0] = await self._fetch_news_body(student_id, merged_news[0])

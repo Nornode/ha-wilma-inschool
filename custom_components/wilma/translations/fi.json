@@ -30,6 +30,7 @@
           "scan_interval_minutes": "Päivitysväli (minuutteina)",
           "only_unread": "Hae vain lukemattomat viestit",
           "no_message_content_fetch_limit": "Poista viestin sisältöhaun raja",
+          "recent_threshold_hours": "Viimeaikaisen toiminnan aikaikkuna (tuntia)",
           "language": "Wilma-kieli"
         }
       }
@@ -39,6 +40,15 @@
     "binary_sensor": {
       "problem": {
         "name": "Ongelma"
+      },
+      "recent_message": {
+        "name": "Viimeaikainen viesti"
+      },
+      "recent_bulletin": {
+        "name": "Viimeaikainen tiedote"
+      },
+      "recent_attendance": {
+        "name": "Viimeaikainen tuntimerkintä"
       }
     },
     "sensor": {

@@ -38,6 +38,7 @@ from .const import (
     SENSOR_ATTENDANCE_COUNT,
     SENSOR_LATEST_BULLETIN,
     SENSOR_LATEST_ATTENDANCE,
+    SENSOR_LAST_HTTP_STATUS,
     SENSOR_LATEST_MESSAGE,
     SENSOR_NEXT_LESSON,
     SENSOR_UNREAD_BULLETIN_COUNT,
@@ -78,6 +79,19 @@ async def async_setup_entry(
     coordinator = hass.data[DOMAIN][entry.entry_id]
 
     entities = []
+
+    entities.append(
+        WilmaLastHttpStatusSensor(
+            coordinator,
+            SensorEntityDescription(
+                key=SENSOR_LAST_HTTP_STATUS,
+                name="Last HTTP Status",
+                icon="mdi:web",
+                entity_category=EntityCategory.DIAGNOSTIC,
+            ),
+            entry,
+        )
+    )
 
     student_profiles = coordinator.data.get("student_profiles", []) if coordinator.data else []
     if not student_profiles:
@@ -495,3 +509,37 @@ class WilmaLatestAttendanceSensor(WilmaBaseStudentSensor):
         if not self.coordinator.data:
             return []
         return self.coordinator.data.get("attendance", {}).get(self._student_id, [])
+
+
+class WilmaLastHttpStatusSensor(CoordinatorEntity, SensorEntity):
+    """Diagnostic sensor exposing the last HTTP status code seen during scraping."""
+
+    def __init__(
+        self,
+        coordinator: WilmaCoordinator,
+        description: SensorEntityDescription,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._attr_unique_id = f"{entry.entry_id}_{description.key}"
+        self._attr_has_entity_name = True
+        self._attr_translation_key = description.key
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": "Wilma",
+            "manufacturer": "Visma",
+            "model": "Wilma",
+            "sw_version": INTEGRATION_VERSION,
+        }
+
+    @property
+    def available(self) -> bool:
+        """Always available — the value is tracked independently of coordinator success."""
+        return True
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the last HTTP status code observed, regardless of update success."""
+        return self.coordinator.last_http_status
