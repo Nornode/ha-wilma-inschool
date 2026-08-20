@@ -716,10 +716,17 @@ class WilmaCoordinator(DataUpdateCoordinator):
                     if isinstance(td, dict) and td.get("nimi")
                 ]
 
+                # Create a unique ID by combining event ID, date, and start time
+                # to avoid conflicts when same lesson appears on different dates
+                event_date = raw_event.get("Date", "")
+                event_id = str(raw_event.get("Id", ""))
+                start_minutes = int(raw_event.get("Start", 0))
+                unique_id = f"{event_id}_{event_date}_{start_minutes}"
+
                 events.append({
-                    "id": str(raw_event.get("Id", "")),
-                    "date": raw_event.get("Date", ""),
-                    "start_minutes": int(raw_event.get("Start", 0)),
+                    "id": unique_id,
+                    "date": event_date,
+                    "start_minutes": start_minutes,
                     "end_minutes": int(raw_event.get("End", 0)),
                     "subject": subject,
                     "subject_long": subject_long,
@@ -740,6 +747,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
     ) -> list[dict[str, Any]]:
         """Fetch one week of schedule for a student."""
         if not self.client:
+            _LOGGER.warning("_fetch_schedule_for_student: no client available")
             return []
         student_name = next(
             (p["name"] for p in self.student_profiles if p["id"] == student_id),
@@ -752,12 +760,13 @@ class WilmaCoordinator(DataUpdateCoordinator):
             if for_date:
                 path += f"?date={for_date.strftime('%d.%m.%Y')}"
             url = f"{self.server_url.rstrip('/')}/{path}"
+            _LOGGER.debug("Fetching schedule from: %s", url)
             async with session.get(self._url_with_lang(url), headers=headers) as resp:
                 self.last_http_status = resp.status
                 if resp.status != 200:
-                    self.last_fetch_errors.append(
-                        f"Schedule for {student_id} returned HTTP {resp.status}"
-                    )
+                    msg = f"Schedule for {student_id} returned HTTP {resp.status}"
+                    _LOGGER.warning(msg)
+                    self.last_fetch_errors.append(msg)
                     return []
                 html = await resp.text()
 
@@ -765,10 +774,13 @@ class WilmaCoordinator(DataUpdateCoordinator):
             if schedule_heading:
                 self.ui_labels["schedule"] = schedule_heading
 
-            return self._parse_schedule_html(html, student_id, student_name)
+            events = self._parse_schedule_html(html, student_id, student_name)
+            _LOGGER.debug("Parsed %d schedule events for %s", len(events), student_id)
+            return events
         except Exception as err:
-            _LOGGER.debug("Error fetching schedule for %s: %s", student_id, err)
-            self.last_fetch_errors.append(f"Schedule fetch for {student_id} failed: {err}")
+            msg = f"Error fetching schedule for {student_id}: {err}"
+            _LOGGER.error(msg, exc_info=True)
+            self.last_fetch_errors.append(msg)
             return []
 
     @staticmethod
@@ -1067,14 +1079,28 @@ class WilmaCoordinator(DataUpdateCoordinator):
             today = dt_util.now().date()
             current_week = today - timedelta(days=today.weekday())
             week_dates = [current_week + timedelta(weeks=i) for i in range(SCHEDULE_WEEKS_AHEAD)]
+            _LOGGER.info(
+                "Fetching schedules: today=%s, current_week=%s, weeks=%s",
+                today,
+                current_week,
+                week_dates,
+            )
             schedules: dict[str, list[dict[str, Any]]] = {}
             for student in self.student_profiles:
                 student_id = student["id"]
                 seen_ids: dict[str, dict[str, Any]] = {}
                 for week_date in week_dates:
-                    for evt in await self._fetch_schedule_for_student(student_id, week_date):
+                    events = await self._fetch_schedule_for_student(student_id, week_date)
+                    _LOGGER.info(
+                        "Fetched %d events for %s on week %s",
+                        len(events),
+                        student_id,
+                        week_date,
+                    )
+                    for evt in events:
                         seen_ids[evt["id"]] = evt
                 schedules[student_id] = sorted(seen_ids.values(), key=self._schedule_sort_key)
+                _LOGGER.info("Total unique events for %s: %d", student_id, len(schedules[student_id]))
 
             # Fetch attendance marks for each student
             prev_attendance: dict[str, set[str]] = {
