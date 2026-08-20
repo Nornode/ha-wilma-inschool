@@ -7,7 +7,8 @@
         "data": {
           "server_url": "Wilma server URL",
           "username": "Username",
-          "password": "Password"
+          "password": "Password",
+          "language": "Wilma language"
         }
       }
     },

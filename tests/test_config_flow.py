@@ -6,9 +6,11 @@ from homeassistant import config_entries, data_entry_flow
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.wilma.const import (
+    CONF_LANGUAGE,
     CONF_PASSWORD,
     CONF_SERVER_URL,
     CONF_USERNAME,
+    DEFAULT_LANGUAGE,
     DOMAIN,
 )
 
@@ -28,6 +30,7 @@ async def test_form(hass, mock_wilma_flow_client, mock_wilma_client):
             CONF_SERVER_URL: "https://test.inschool.fi",
             CONF_USERNAME: "testuser",
             CONF_PASSWORD: "testpass",
+            CONF_LANGUAGE: "3",
         },
     )
 
@@ -38,6 +41,7 @@ async def test_form(hass, mock_wilma_flow_client, mock_wilma_client):
         CONF_USERNAME: "testuser",
         CONF_PASSWORD: "testpass",
     }
+    assert result["options"] == {CONF_LANGUAGE: "3"}
 
 
 async def test_form_invalid_auth(hass, mock_wilma_exception_client):
@@ -52,6 +56,7 @@ async def test_form_invalid_auth(hass, mock_wilma_exception_client):
             CONF_SERVER_URL: "https://test.inschool.fi",
             CONF_USERNAME: "testuser",
             CONF_PASSWORD: "testpass",
+            CONF_LANGUAGE: DEFAULT_LANGUAGE,
         },
     )
 
@@ -80,6 +85,7 @@ async def test_form_auth_rejected(hass):
                 CONF_SERVER_URL: "https://test.inschool.fi",
                 CONF_USERNAME: "testuser",
                 CONF_PASSWORD: "testpass",
+                CONF_LANGUAGE: DEFAULT_LANGUAGE,
             },
         )
 
@@ -113,6 +119,7 @@ async def test_duplicate_entries(hass, mock_wilma_flow_client, mock_wilma_client
             CONF_SERVER_URL: "https://test.inschool.fi",
             CONF_USERNAME: "testuser",
             CONF_PASSWORD: "testpass",
+            CONF_LANGUAGE: DEFAULT_LANGUAGE,
         },
     )
 

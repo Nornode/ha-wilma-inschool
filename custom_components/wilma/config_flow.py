@@ -39,6 +39,15 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_SERVER_URL): str,
         vol.Required(CONF_USERNAME): str,
         vol.Required(CONF_PASSWORD): str,
+        vol.Required(CONF_LANGUAGE, default=DEFAULT_LANGUAGE): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[
+                    {"value": "1", "label": "Finnish (Suomi)"},
+                    {"value": "2", "label": "Swedish (Svenska)"},
+                    {"value": "3", "label": "English"},
+                ],
+            )
+        ),
     }
 )
 
@@ -98,7 +107,17 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             try:
                 info = await validate_input(self.hass, user_input)
-                return self.async_create_entry(title=info["title"], data=user_input)
+                entry_data = {
+                    CONF_SERVER_URL: user_input[CONF_SERVER_URL],
+                    CONF_USERNAME: user_input[CONF_USERNAME],
+                    CONF_PASSWORD: user_input[CONF_PASSWORD],
+                }
+                entry_options = {CONF_LANGUAGE: user_input[CONF_LANGUAGE]}
+                return self.async_create_entry(
+                    title=info["title"],
+                    data=entry_data,
+                    options=entry_options,
+                )
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             except AuthRejected:
