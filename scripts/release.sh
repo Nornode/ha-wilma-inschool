@@ -1,4 +1,25 @@
 #!/usr/bin/env bash
+
+# Release helper for the Wilma Home Assistant custom integration.
+#
+# What it does:
+#   - Reads the current version from manifest.json and finds the latest tag.
+#   - Collects commit and file-change information for the release range.
+#   - Generates release notes using AI_RELEASE_SUMMARY_CMD, Copilot CLI,
+#     OpenAI, or a draft made from commit subjects.
+#   - Optionally updates the manifest, creates an annotated tag, and pushes the
+#     current branch and tag to origin.
+#
+# How to use:
+#   1. Run it from a clean release branch.
+#   2. A locally authenticated Copilot CLI is used automatically when present;
+#      otherwise set OPENAI_API_KEY or AI_RELEASE_SUMMARY_CMD if desired.
+#   3. Execute: ./scripts/release.sh
+#   4. Review the proposed tag and notes, then confirm the final prompt.
+#
+# Requirements: git and python3. Existing local or remote tags are protected,
+# and confirmation is required before release changes are made and pushed.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -159,10 +180,40 @@ print(text)
 PY
 }
 
+generate_with_copilot() {
+  local prompt
+  prompt="$(cat "$PROMPT_FILE")"
+
+  # The standalone Copilot CLI uses its existing local authentication, so no
+  # API key is required in the environment.
+  if command -v copilot >/dev/null 2>&1; then
+    copilot -p "$prompt"
+    return
+  fi
+
+  # Support the GitHub CLI Copilot extension as an alternative installation.
+  if command -v gh >/dev/null 2>&1 && gh copilot --help >/dev/null 2>&1; then
+    gh copilot suggest "$prompt"
+    return
+  fi
+
+  return 1
+}
+
 generate_summary() {
   if [ -n "${AI_RELEASE_SUMMARY_CMD:-}" ]; then
     eval "$AI_RELEASE_SUMMARY_CMD" < "$PROMPT_FILE"
     return
+  fi
+
+  if command -v copilot >/dev/null 2>&1 || {
+    command -v gh >/dev/null 2>&1 && gh copilot --help >/dev/null 2>&1
+  }; then
+    echo "Using the locally installed Copilot CLI for release notes." >&2
+    if generate_with_copilot; then
+      return
+    fi
+    echo "Warning: Copilot CLI failed; trying the next configured provider." >&2
   fi
 
   if [ -n "${OPENAI_API_KEY:-}" ]; then
