@@ -42,44 +42,47 @@
         "name": "Problem"
       },
       "recent_message": {
-        "name": "Senaste meddelande (nytt)"
+        "name": "Senaste {message_label_singular}"
       },
       "recent_bulletin": {
-        "name": "Senaste bulletin (ny)"
+        "name": "Senaste {bulletin_label_singular}"
       },
       "recent_attendance": {
-        "name": "Senaste lektionsanmärkning (ny)"
+        "name": "Senaste {attendance_label_singular}"
       }
     },
     "sensor": {
       "latest_message": {
-        "name": "Senaste meddelande"
+        "name": "Senaste {message_label_singular}"
       },
       "unread_count": {
-        "name": "Olästa meddelanden"
+        "name": "Olästa {message_label_plural}"
       },
       "latest_bulletin": {
-        "name": "Senaste meddelande"
+        "name": "Senaste {bulletin_label_singular}"
       },
       "unread_bulletin_count": {
-        "name": "Olästa meddelanden"
+        "name": "Olästa {bulletin_label_plural}"
       },
       "last_update": {
         "name": "Senaste uppdatering"
       },
       "next_lesson": {
-        "name": "Nästa lektion"
+        "name": "Nästa {schedule_label_singular}"
       },
       "attendance_count": {
-        "name": "Lektionsanmärkningar"
+        "name": "Antal {attendance_label_plural}"
       },
       "latest_attendance": {
-        "name": "Senaste lektionsanmärkning"
+        "name": "Senaste {attendance_label_singular}"
+      },
+      "last_http_status": {
+        "name": "Senaste HTTP-status"
       }
     },
     "calendar": {
       "schedule": {
-        "name": "Schema"
+        "name": "{schedule_label_singular}"
       }
     }
   }

@@ -51,7 +51,11 @@ class WilmaCalendarEntity(CoordinatorEntity, CalendarEntity):
         first_name = student_name.split()[0] if student_name else student_name
         self._attr_unique_id = f"{entry.entry_id}_{student_id}_calendar"
         self._attr_has_entity_name = True
-        self._attr_translation_key = "schedule"
+        self._attr_name = coordinator.entity_name("schedule")
+        self.internal_integration_suggested_object_id = coordinator.entity_object_id(
+            "schedule",
+            student_name,
+        )
         self._attr_device_info = {
             "identifiers": {(DOMAIN, f"{entry.entry_id}_{student_id}")},
             "name": f"Wilma {first_name}",

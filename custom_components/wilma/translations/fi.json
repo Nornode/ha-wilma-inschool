@@ -42,44 +42,47 @@
         "name": "Ongelma"
       },
       "recent_message": {
-        "name": "Viimeaikainen viesti"
+        "name": "Viimeisin {message_label_singular}"
       },
       "recent_bulletin": {
-        "name": "Viimeaikainen tiedote"
+        "name": "Viimeisin {bulletin_label_singular}"
       },
       "recent_attendance": {
-        "name": "Viimeaikainen tuntimerkintä"
+        "name": "Viimeisin {attendance_label_singular}"
       }
     },
     "sensor": {
       "latest_message": {
-        "name": "Viimeisin viesti"
+        "name": "Viimeisin {message_label_singular}"
       },
       "unread_count": {
-        "name": "Lukemattomat viestit"
+        "name": "Lukemattomat {message_label_plural}"
       },
       "latest_bulletin": {
-        "name": "Uusin tiedote"
+        "name": "Uusin {bulletin_label_singular}"
       },
       "unread_bulletin_count": {
-        "name": "Lukemattomat tiedotteet"
+        "name": "Lukemattomat {bulletin_label_plural}"
       },
       "last_update": {
         "name": "Viimeisin päivitys"
       },
       "next_lesson": {
-        "name": "Seuraava tunti"
+        "name": "Seuraava {schedule_label_singular}"
       },
       "attendance_count": {
-        "name": "Tuntimerkinnät"
+        "name": "{attendance_label_plural} yhteensä"
       },
       "latest_attendance": {
-        "name": "Viimeisin tuntimerkintä"
+        "name": "Viimeisin {attendance_label_singular}"
+      },
+      "last_http_status": {
+        "name": "Viimeisin HTTP-tila"
       }
     },
     "calendar": {
       "schedule": {
-        "name": "Lukujärjestys"
+        "name": "{schedule_label_singular}"
       }
     }
   }

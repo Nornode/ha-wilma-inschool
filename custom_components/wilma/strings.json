@@ -41,44 +41,47 @@
         "name": "Problem"
       },
       "recent_message": {
-        "name": "Recent Message"
+        "name": "Recent {message_label_singular}"
       },
       "recent_bulletin": {
-        "name": "Recent Bulletin"
+        "name": "Recent {bulletin_label_singular}"
       },
       "recent_attendance": {
-        "name": "Recent Attendance Mark"
+        "name": "Recent {attendance_label_singular}"
       }
     },
     "sensor": {
       "latest_message": {
-        "name": "Latest Message"
+        "name": "Latest {message_label_singular}"
       },
       "unread_count": {
-        "name": "Unread Messages"
+        "name": "Unread {message_label_plural}"
       },
       "latest_bulletin": {
-        "name": "Latest Bulletin"
+        "name": "Latest {bulletin_label_singular}"
       },
       "unread_bulletin_count": {
-        "name": "Unread Bulletins"
+        "name": "Unread {bulletin_label_plural}"
       },
       "last_update": {
         "name": "Last Update"
       },
       "next_lesson": {
-        "name": "Next Lesson"
+        "name": "Next {schedule_label_singular}"
       },
       "attendance_count": {
-        "name": "Attendance Marks"
+        "name": "{attendance_label_plural}"
       },
       "latest_attendance": {
-        "name": "Latest Attendance Mark"
+        "name": "Latest {attendance_label_singular}"
+      },
+      "last_http_status": {
+        "name": "Last HTTP Status"
       }
     },
     "calendar": {
       "schedule": {
-        "name": "Schedule"
+        "name": "{schedule_label_singular}"
       }
     }
   }

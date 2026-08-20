@@ -70,7 +70,10 @@ class WilmaProblemBinarySensor(CoordinatorEntity, BinarySensorEntity):
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_problem"
         self._attr_has_entity_name = True
-        self._attr_translation_key = BINARY_SENSOR_PROBLEM
+        self._attr_name = coordinator.entity_name(BINARY_SENSOR_PROBLEM)
+        self.internal_integration_suggested_object_id = coordinator.entity_object_id(
+            BINARY_SENSOR_PROBLEM
+        )
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "Wilma",
@@ -116,7 +119,11 @@ class WilmaBaseStudentBinarySensor(CoordinatorEntity, BinarySensorEntity):
         first_name = student_name.split()[0] if student_name else student_name
         self._attr_unique_id = f"{entry.entry_id}_{student_id}_{description.key}"
         self._attr_has_entity_name = True
-        self._attr_translation_key = description.key
+        self._attr_name = coordinator.entity_name(description.key)
+        self.internal_integration_suggested_object_id = coordinator.entity_object_id(
+            description.key,
+            student_name,
+        )
         self._attr_device_info = {
             "identifiers": {(DOMAIN, f"{entry.entry_id}_{student_id}")},
             "name": f"Wilma {first_name}",

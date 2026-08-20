@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import unicodedata
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -79,6 +80,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
         self.store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}_{entry_id}")
         self.last_update_success_time = None
         self.student_profiles: list[dict[str, str]] = []
+        self.ui_labels: dict[str, str] = {}
         self.last_fetch_errors: list[str] = []
         self.last_http_status: int | None = None
 
@@ -106,6 +108,217 @@ class WilmaCoordinator(DataUpdateCoordinator):
         """Append ?langid= (or &langid=) to a Wilma URL."""
         sep = "&" if "?" in url else "?"
         return f"{url}{sep}langid={self.language}"
+
+    def _translation_placeholders_for_key(self, entity_key: str) -> dict[str, str]:
+        """Return placeholder values used by translated entity names."""
+        message_singular, message_plural = self._noun_forms_for_label(
+            self.ui_labels.get("message", "Message")
+        )
+        bulletin_singular, bulletin_plural = self._noun_forms_for_label(
+            self.ui_labels.get("bulletin", "Bulletin")
+        )
+        schedule_singular, schedule_plural = self._noun_forms_for_label(
+            self.ui_labels.get("schedule", "Schedule")
+        )
+        attendance_singular, attendance_plural = self._noun_forms_for_label(
+            self.ui_labels.get("attendance", "Attendance")
+        )
+
+        if entity_key in {"latest_message", "unread_count", "recent_message"}:
+            return {
+                "message_label_singular": message_singular,
+                "message_label_plural": message_plural,
+            }
+        if entity_key in {"latest_bulletin", "unread_bulletin_count", "recent_bulletin"}:
+            return {
+                "bulletin_label_singular": bulletin_singular,
+                "bulletin_label_plural": bulletin_plural,
+            }
+        if entity_key in {"next_lesson", "schedule"}:
+            return {
+                "schedule_label_singular": schedule_singular,
+                "schedule_label_plural": schedule_plural,
+            }
+        if entity_key in {"attendance_count", "latest_attendance", "recent_attendance"}:
+            return {
+                "attendance_label_singular": attendance_singular,
+                "attendance_label_plural": attendance_plural,
+            }
+        return {}
+
+    def entity_name(self, entity_key: str) -> str:
+        """Return a localized friendly entity name independent of HA UI language."""
+        if self.language == 1:
+            message_singular, message_plural = "viesti", "viestit"
+        elif self.language == 2:
+            message_singular, message_plural = "meddelande", "meddelanden"
+        else:
+            message_singular, message_plural = "message", "messages"
+
+        bulletin_singular, bulletin_plural = self._noun_forms_for_label(
+            self.ui_labels.get("bulletin", "Bulletin")
+        )
+
+        if self.language == 1:
+            latest_prefix = "Viimeisin"
+            unread_prefix = "Lukemattomat"
+            last_update = "Viimeisin päivitys"
+            problem = "Ongelma"
+            http_status = "Viimeisin HTTP-tila"
+            schedule_name = self.ui_labels.get("schedule", "Opiskelijan työjärjestys")
+            next_lesson = "Seuraava tunti"
+            bulletin_latest = f"{latest_prefix} {bulletin_singular}"
+            bulletin_unread = f"{unread_prefix} {bulletin_plural}"
+            message_latest = f"{latest_prefix} {message_singular}"
+            message_unread = f"{unread_prefix} {message_plural}"
+            attendance_latest = f"{latest_prefix} tuntimerkintä"
+            attendance_count = "tuntimerkinnät"
+        elif self.language == 2:
+            latest_prefix = "Senaste"
+            unread_prefix = "Olästa"
+            last_update = "Senaste uppdatering"
+            problem = "Problem"
+            http_status = "Senaste HTTP-status"
+            schedule_name = self.ui_labels.get("schedule", "Studerandens schema")
+            next_lesson = "Nästa lektion"
+            bulletin_latest = f"{latest_prefix} {bulletin_singular}"
+            bulletin_unread = f"{unread_prefix} {bulletin_plural}"
+            message_latest = f"{latest_prefix} {message_singular}"
+            message_unread = f"{unread_prefix} {message_plural}"
+            attendance_latest = f"{latest_prefix} lektionsanteckning"
+            attendance_count = "lektionsanteckningar"
+        else:
+            latest_prefix = "Latest"
+            unread_prefix = "Unread"
+            last_update = "Last update"
+            problem = "Problem"
+            http_status = "Last HTTP status"
+            schedule_name = self.ui_labels.get("schedule", "Schedule")
+            next_lesson = "Next lesson"
+            bulletin_latest = f"{latest_prefix} {bulletin_singular}"
+            bulletin_unread = f"{unread_prefix} {bulletin_plural}"
+            message_latest = f"{latest_prefix} {message_singular}"
+            message_unread = f"{unread_prefix} {message_plural}"
+            attendance_latest = f"{latest_prefix} attendance mark"
+            attendance_count = "attendance marks"
+
+        mapping = {
+            "problem": problem,
+            "recent_message": message_latest,
+            "latest_message": message_latest,
+            "unread_count": message_unread,
+            "recent_bulletin": bulletin_latest,
+            "latest_bulletin": bulletin_latest,
+            "unread_bulletin_count": bulletin_unread,
+            "recent_attendance": attendance_latest,
+            "last_update": last_update,
+            "next_lesson": next_lesson,
+            "attendance_count": attendance_count,
+            "latest_attendance": attendance_latest,
+            "last_http_status": http_status,
+            "schedule": schedule_name,
+        }
+
+        return mapping.get(entity_key, entity_key)
+
+    @staticmethod
+    def _slugify_object_id(text: str) -> str:
+        """Return an English, ASCII-safe object-id slug."""
+        first_token = text.split()[0] if text.split() else text
+        normalized = unicodedata.normalize("NFKD", first_token)
+        ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+        slug = re.sub(r"[^a-zA-Z0-9]+", "_", ascii_text).strip("_").lower()
+        return slug or "wilma"
+
+    def entity_object_id(
+        self,
+        entity_key: str,
+        student_name: str | None = None,
+    ) -> str:
+        """Return the stable English object id for one entity."""
+        if student_name:
+            student_slug = self._slugify_object_id(student_name)
+            return f"wilma_{student_slug}_{entity_key}"
+
+        return f"wilma_{entity_key}"
+
+    @staticmethod
+    def _noun_forms_for_label(label: str) -> tuple[str, str]:
+        """Return singular and plural noun forms derived from a scraped UI label."""
+        if not label:
+            return "", ""
+
+        noun = label.split()[-1]
+        lowered = noun.lower()
+        singular_map = {
+            "meddelanden": "meddelande",
+            "notiser": "notis",
+            "anteckningar": "anteckning",
+            "viestit": "viesti",
+            "tiedotteet": "tiedote",
+            "tuntimerkinnät": "tuntimerkning",
+        }
+        plural_map = {
+            "meddelanden": "meddelanden",
+            "notiser": "notiser",
+            "anteckningar": "anteckningar",
+            "viestit": "viestit",
+            "tiedotteet": "tiedotteet",
+            "tuntimerkinnät": "tuntimerkningar",
+        }
+
+        singular = singular_map.get(lowered, noun)
+        plural = plural_map.get(lowered, noun)
+        return singular, plural
+
+    @staticmethod
+    def _extract_ui_labels(home_html: str) -> dict[str, str]:
+        """Extract localized Wilma navigation labels from the authenticated home page."""
+        soup = BeautifulSoup(home_html, "html.parser")
+        labels: dict[str, str] = {}
+
+        mapping = {
+            "messages": "message",
+            "news": "bulletin",
+            "schedule": "schedule",
+            "attendance": "attendance",
+        }
+
+        for link in soup.select("a[href]"):
+            href = (link.get("href") or "").lower()
+            text = link.get_text(" ", strip=True)
+            if not text:
+                continue
+
+            # Ignore profile-scoped links such as /!123456/messages.
+            if re.search(r"/![a-z0-9]+/", href):
+                continue
+
+            for path_part, key in mapping.items():
+                if f"/{path_part}" in href:
+                    labels.setdefault(key, text)
+
+        return labels
+
+    @staticmethod
+    def _extract_page_heading(html: str) -> str | None:
+        """Return the localized page label from the document title or heading."""
+        soup = BeautifulSoup(html, "html.parser")
+        if soup.title:
+            title = soup.title.get_text(" ", strip=True)
+            if title:
+                if " - " in title:
+                    title = title.rsplit(" - ", 1)[0].strip()
+                if title:
+                    return title
+
+        for selector in ("h1", "main h2", "h2"):
+            node = soup.select_one(selector)
+            if node:
+                text = node.get_text(" ", strip=True)
+                if text:
+                    return text
+        return None
 
     @staticmethod
     def _timestamp_sort_key(message: dict[str, Any]) -> datetime:
@@ -289,6 +502,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
             return [{"id": default_id, "name": self.username}] if default_id else []
 
         soup = BeautifulSoup(html, "html.parser")
+        self.ui_labels = self._extract_ui_labels(html)
         for link in soup.select("a[href]"):
             href = link.get("href") or ""
             match = re.search(r"/(![A-Za-z0-9]+)", href)
@@ -324,6 +538,20 @@ class WilmaCoordinator(DataUpdateCoordinator):
         original_user_id = self.client.user_id
         self.client.user_id = student_id
         try:
+            try:
+                session = await self.client._ensure_session()
+                headers = {"Wilma2SID": self.client._sid or ""}
+                msg_url = f"{self.server_url.rstrip('/')}/{student_id.lstrip('/')}/messages"
+                async with session.get(self._url_with_lang(msg_url), headers=headers) as resp:
+                    self.last_http_status = resp.status
+                    if resp.status == 200:
+                        msg_html = await resp.text()
+                        message_heading = self._extract_page_heading(msg_html)
+                        if message_heading:
+                            self.ui_labels["message"] = message_heading
+            except Exception as err:
+                _LOGGER.debug("Could not extract messages heading for %s: %s", student_id, err)
+
             messages = await self.client.get_messages(
                 only_unread=self.only_unread,
                 with_content=True,
@@ -362,6 +590,11 @@ class WilmaCoordinator(DataUpdateCoordinator):
                     )
                     return []
                 html = await resp.text()
+
+            news_heading = self._extract_page_heading(html)
+            if news_heading:
+                self.ui_labels["bulletin"] = news_heading
+
             student_name = next(
                 (
                     profile["name"]
@@ -527,6 +760,11 @@ class WilmaCoordinator(DataUpdateCoordinator):
                     )
                     return []
                 html = await resp.text()
+
+            schedule_heading = self._extract_page_heading(html)
+            if schedule_heading:
+                self.ui_labels["schedule"] = schedule_heading
+
             return self._parse_schedule_html(html, student_id, student_name)
         except Exception as err:
             _LOGGER.debug("Error fetching schedule for %s: %s", student_id, err)
@@ -718,6 +956,10 @@ class WilmaCoordinator(DataUpdateCoordinator):
             async with session.get(self._url_with_lang(unexplained_url), headers=h) as resp:
                 self.last_http_status = resp.status
                 unexplained_html = await resp.text() if resp.status == 200 else ""
+
+            attendance_heading = self._extract_page_heading(unexplained_html)
+            if attendance_heading:
+                self.ui_labels["attendance"] = attendance_heading
 
             all_marks = self._parse_attendance_view_html(view_html) if view_html else []
             unexplained = self._parse_attendance_unexplained_html(unexplained_html) if unexplained_html else []
