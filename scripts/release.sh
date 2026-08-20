@@ -65,7 +65,6 @@ with open(sys.argv[1], encoding="utf-8") as manifest:
 PY
 )"
 
-DEFAULT_TAG="v$VERSION"
 CURRENT_BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null || true)"
 [ -n "$CURRENT_BRANCH" ] || die "Releases must be made from a branch, not a detached HEAD."
 
@@ -82,8 +81,32 @@ else
   echo "No existing tags found. The release summary will use the full history."
 fi
 
+NEXT_TAG="$(python3 - "${LATEST_TAG:-}" <<'PY'
+import sys
+import datetime
+
+latest = sys.argv[1]
+today = datetime.date.today()
+
+if latest.startswith('v'):
+  parts = latest[1:].split('.')
+  if len(parts) == 3:
+    try:
+      tag_year, tag_month, tag_seq = int(parts[0]), int(parts[1]), int(parts[2])
+      next_seq = tag_seq + 1 if (tag_year == today.year and tag_month == today.month) else 1
+    except ValueError:
+      next_seq = 1
+  else:
+    next_seq = 1
+else:
+  next_seq = 1
+
+print(f"v{today.year}.{today.month:02d}.{next_seq:02d}")
+PY
+)"
+
 echo
-NEW_TAG="$(prompt_default "New tag" "$DEFAULT_TAG")"
+NEW_TAG="$(prompt_default "New tag" "$NEXT_TAG")"
 PREVIOUS_TAG="$(prompt_default "Compare from tag" "${LATEST_TAG:-<root>}")"
 
 [[ "$NEW_TAG" =~ ^v20[0-9]{2}\.(0[1-9]|1[0-2])\.[0-9]{2}([-+][0-9A-Za-z.-]+)?$ ]] || die "Tag must look like v2026.08.01; got $NEW_TAG"
