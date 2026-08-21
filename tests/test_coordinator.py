@@ -103,6 +103,9 @@ async def test_coordinator_auth_error(hass):
         # Verify client was cleared
         assert coordinator.client is None
 
+        # Cancel the fast-retry timer so it does not linger after the test.
+        await coordinator.async_close_client()
+
 
 async def test_coordinator_wilma_error(hass):
     """Test general Wilma error handling in coordinator."""
