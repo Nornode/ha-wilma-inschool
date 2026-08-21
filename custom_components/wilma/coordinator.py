@@ -12,6 +12,7 @@ import html2text
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 from wilhelmina import AuthenticationError, Message, Sender, WilmaClient, WilmaError
@@ -77,6 +78,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
         self.password = password
         self.entry_id = entry_id
         self.client = None
+        self._retry_cancel = None
         self.store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}_{entry_id}")
         self.last_update_success_time = None
         self.student_profiles: list[dict[str, str]] = []
@@ -474,6 +476,27 @@ class WilmaCoordinator(DataUpdateCoordinator):
         )
         return item
 
+    @staticmethod
+    def _is_login_page(html: str) -> bool:
+        """Return True if the HTML is the Wilma login form (silent session expiry)."""
+        lower = html.lower()
+        return "<form" in lower and 'type="password"' in lower
+
+    async def _is_session_valid(self) -> bool:
+        """Return False if the current session token is stale."""
+        if not self.client:
+            return False
+        try:
+            session = await self.client._ensure_session()
+            headers = {"Wilma2SID": self.client._sid or ""}
+            async with session.get(self.client.base_url, headers=headers) as resp:
+                if resp.status != 200:
+                    return False
+                html = await resp.text()
+                return not self._is_login_page(html)
+        except Exception:
+            return False
+
     async def _discover_students(self) -> list[dict[str, str]]:
         """Discover available user IDs from the authenticated home page."""
         if not self.client:
@@ -500,6 +523,12 @@ class WilmaCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("Could not discover student IDs from home page: %s", err)
             self.last_fetch_errors.append(f"Student discovery failed: {err}")
             return [{"id": default_id, "name": self.username}] if default_id else []
+
+        if self._is_login_page(html):
+            self.last_http_status = -1
+            self.client = None
+            _LOGGER.warning("Wilma session expired — login page returned; will re-authenticate on next cycle")
+            return []
 
         soup = BeautifulSoup(html, "html.parser")
         self.ui_labels = self._extract_ui_labels(html)
@@ -591,6 +620,11 @@ class WilmaCoordinator(DataUpdateCoordinator):
                     return []
                 html = await resp.text()
 
+            if self._is_login_page(html):
+                self.last_http_status = -1
+                self.client = None
+                raise UpdateFailed(f"Wilma session expired (login page on news fetch for {student_id})")
+
             news_heading = self._extract_page_heading(html)
             if news_heading:
                 self.ui_labels["bulletin"] = news_heading
@@ -604,6 +638,8 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 self.username,
             )
             return self._parse_news_html(html, student_id, student_name)
+        except UpdateFailed:
+            raise
         except Exception as err:
             _LOGGER.debug("Error fetching news for %s: %s", student_id, err)
             self.last_fetch_errors.append(f"News fetch for {student_id} failed: {err}")
@@ -770,6 +806,11 @@ class WilmaCoordinator(DataUpdateCoordinator):
                     return []
                 html = await resp.text()
 
+            if self._is_login_page(html):
+                self.last_http_status = -1
+                self.client = None
+                raise UpdateFailed(f"Wilma session expired (login page on schedule fetch for {student_id})")
+
             schedule_heading = self._extract_page_heading(html)
             if schedule_heading:
                 self.ui_labels["schedule"] = schedule_heading
@@ -777,6 +818,8 @@ class WilmaCoordinator(DataUpdateCoordinator):
             events = self._parse_schedule_html(html, student_id, student_name)
             _LOGGER.debug("Parsed %d schedule events for %s", len(events), student_id)
             return events
+        except UpdateFailed:
+            raise
         except Exception as err:
             msg = f"Error fetching schedule for {student_id}: {err}"
             _LOGGER.error(msg, exc_info=True)
@@ -963,6 +1006,11 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 self.last_http_status = resp.status
                 view_html = await resp.text() if resp.status == 200 else ""
 
+            if view_html and self._is_login_page(view_html):
+                self.last_http_status = -1
+                self.client = None
+                raise UpdateFailed(f"Wilma session expired (login page on attendance fetch for {student_id})")
+
             # Unexplained marks
             unexplained_url = f"{base}/{uid}/attendance"
             async with session.get(self._url_with_lang(unexplained_url), headers=h) as resp:
@@ -976,6 +1024,8 @@ class WilmaCoordinator(DataUpdateCoordinator):
             all_marks = self._parse_attendance_view_html(view_html) if view_html else []
             unexplained = self._parse_attendance_unexplained_html(unexplained_html) if unexplained_html else []
             return all_marks, unexplained
+        except UpdateFailed:
+            raise
         except Exception as err:
             _LOGGER.debug("Error fetching attendance for %s: %s", student_id, err)
             return [], []
@@ -992,6 +1042,10 @@ class WilmaCoordinator(DataUpdateCoordinator):
             stored_news = {}
 
         try:
+            if self.client is not None and not await self._is_session_valid():
+                _LOGGER.warning("Wilma session no longer valid; re-authenticating")
+                await self.async_close_client()
+
             if self.client is None:
                 self.client = WilmaClient(self.server_url)
                 _LOGGER.debug(
@@ -1000,8 +1054,11 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 await self.client.login(self.username, self.password)
 
             self.student_profiles = await self._discover_students()
-            if not self.student_profiles and self.client.user_id:
+            if not self.student_profiles and self.client is not None and self.client.user_id:
                 self.student_profiles = [{"id": self.client.user_id, "name": self.username}]
+            if not self.student_profiles:
+                self.client = None
+                raise UpdateFailed("No student profiles found — possible session expiry")
 
             updated_students: dict[str, list[dict[str, Any]]] = {}
             updated_news: dict[str, list[dict[str, Any]]] = {}
@@ -1184,6 +1241,11 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 raise UpdateFailed("Authentication rejected by Wilma server (HTTP 403)") from err
 
             _LOGGER.error("Authentication to Wilma failed: %s", err)
+            if self._retry_cancel:
+                self._retry_cancel()
+            self._retry_cancel = async_call_later(
+                self.hass, 60, lambda _: self.hass.async_create_task(self.async_request_refresh())
+            )
             raise UpdateFailed("Authentication failed") from err
         except WilmaError as err:
             _LOGGER.error("Error communicating with Wilma: %s", err)
@@ -1194,6 +1256,9 @@ class WilmaCoordinator(DataUpdateCoordinator):
 
     async def async_close_client(self):
         """Close the Wilma client."""
+        if self._retry_cancel:
+            self._retry_cancel()
+            self._retry_cancel = None
         if self.client:
             try:
                 await self.client.close()

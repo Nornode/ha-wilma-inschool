@@ -92,12 +92,21 @@ class WilmaProblemBinarySensor(CoordinatorEntity, BinarySensorEntity):
         """Return True when the last coordinator update failed or partial fetch errors occurred."""
         if not self.coordinator.last_update_success:
             return True
-        return bool(self.coordinator.last_fetch_errors)
+        if bool(self.coordinator.last_fetch_errors):
+            return True
+        # Silent session expiry: update reported success but no profiles were discovered.
+        data = self.coordinator.data or {}
+        if not data.get("student_profiles"):
+            return True
+        return False
 
     @property
     def extra_state_attributes(self) -> dict:
         """Return fetch error details when in problem state."""
-        return {"errors": list(self.coordinator.last_fetch_errors)}
+        return {
+            "errors": list(self.coordinator.last_fetch_errors),
+            "session_active": self.coordinator.client is not None,
+        }
 
 
 class WilmaBaseStudentBinarySensor(CoordinatorEntity, BinarySensorEntity):
