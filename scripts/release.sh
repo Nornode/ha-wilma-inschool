@@ -46,6 +46,27 @@ prompt_default() {
 need git
 need python3
 
+# ---------------------------------------------------------------------------
+# AI release-notes configuration — edit the two sections below.
+# ---------------------------------------------------------------------------
+#
+# AI_CONTEXT: Permanent project description injected into every prompt.
+# Describes the integration, its audience, and the preferred tone.
+# This rarely changes between releases.
+AI_CONTEXT="This is a Home Assistant custom integration for the Wilma school
+management system used in Finland and Sweden. Users are parents and guardians
+monitoring their children's school schedule, messages, bulletins, and grades.
+Write release notes in plain English. Focus on changes that affect daily use:
+new sensors or entities, fixes that previously caused visible errors, and UI
+or language improvements. Use a bold keyword at the start of each bullet."
+#
+# AI_INSTRUCTIONS: Optional one-time instructions for this specific release.
+# Use this to highlight a theme, add caveats, or steer the summary.
+# Leave empty to let the AI decide based on the commit list alone.
+# Example: "Highlight the new attendance sensor and note the config change."
+AI_INSTRUCTIONS=""
+# ---------------------------------------------------------------------------
+
 MANIFEST_CANDIDATES=()
 while IFS= read -r manifest; do
   MANIFEST_CANDIDATES+=("$manifest")
@@ -156,6 +177,12 @@ fi
 cat > "$PROMPT_FILE" <<EOF
 Write concise release notes for $NEW_TAG of a Home Assistant custom integration.
 
+Project context:
+$AI_CONTEXT
+${AI_INSTRUCTIONS:+
+Special instructions for this release:
+$AI_INSTRUCTIONS
+}
 Focus on the largest user-facing changes between ${PREVIOUS_TAG} and $NEW_TAG.
 Return only 3 to 6 markdown bullet points. Do not invent changes.
 
@@ -261,6 +288,23 @@ generate_summary() {
 
 generate_summary > "$SUMMARY_FILE"
 
+# Strip ANSI escape sequences and carriage returns that some AI CLIs embed in
+# stdout output. Without this, control codes end up in the tag annotation and
+# the Actions workflow's grep check sees an effectively empty body.
+python3 - "$SUMMARY_FILE" <<'PY'
+import re, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+text = p.read_text(encoding="utf-8", errors="replace")
+text = re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', text)
+text = text.replace('\r', '').strip()
+p.write_text(text + '\n', encoding="utf-8")
+PY
+
+if [ ! -s "$SUMMARY_FILE" ]; then
+  die "AI provider returned an empty summary; cannot create release. Set OPENAI_API_KEY or AI_RELEASE_SUMMARY_CMD and retry."
+fi
+
 echo
 echo "Release notes for $NEW_TAG:"
 echo "----------------------------------------"
@@ -302,5 +346,16 @@ git tag -a "$NEW_TAG" -F "$SUMMARY_FILE"
 git push origin "$CURRENT_BRANCH"
 git push origin "$NEW_TAG"
 
+# Create the GitHub release directly so the AI notes appear immediately.
+if command -v gh >/dev/null 2>&1; then
+  if gh release create "$NEW_TAG" \
+      --title "$NEW_TAG" \
+      --notes-file "$SUMMARY_FILE" >/dev/null 2>&1; then
+    echo "GitHub release created with AI-generated notes."
+  else
+    echo "Warning: could not create GitHub release; the Actions workflow will create it from the tag annotation." >&2
+  fi
+fi
+
 echo
-echo "Pushed $CURRENT_BRANCH and $NEW_TAG to origin. The release workflow will use the tag annotation as the release description."
+echo "Pushed $CURRENT_BRANCH and $NEW_TAG to origin."
