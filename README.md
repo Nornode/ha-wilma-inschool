@@ -12,10 +12,11 @@ A Home Assistant integration for the [Wilma](https://www.wilma.fi/) school platf
 - **Attendance** — fetches the full school-year attendance history; tracks unexplained marks and fires an event when new marks appear
 - **Multilingual UI** — config/options flow translated to English, Finnish and Swedish
 - Configurable poll interval, unread-only mode and message-fetch limits
+- **AI-ready summaries** — includes a reusable blueprint pattern for long-form summaries of message and attendance text via Home Assistant conversation agents
 
 ## Entities
 
-All entities live under the **Wilma {First name}** device (e.g. _Wilma Emma_).
+All entities live under the **Wilma {First name}** device (e.g. _Wilma Virppi_).
 
 | Entity                   | Type     | Description                                                                                        |
 | ------------------------ | -------- | -------------------------------------------------------------------------------------------------- |
@@ -98,6 +99,36 @@ automation:
           message: "{{ summary.response.speech.plain.speech }}"
 ```
 
+## AI Summary Blueprint
+
+Home Assistant can return a response from `conversation.process`, but a normal entity state can only store 255 characters. For longer summaries, this repository includes a reusable blueprint that stores the AI reply across multiple `input_text` helpers and exposes the full text through a template sensor attribute.
+
+- Blueprint file: `blueprints/automation/wilma/ai_entity_summary.yaml`
+- Best for: `latest_message`, `latest_attendance_mark`, and any future text-heavy Wilma sensors
+- Storage model: 3 x `input_text` helpers, then one template sensor with a `summary` attribute
+
+Quick example:
+
+```yaml
+alias: Wilma Virppi latest message AI summary
+use_blueprint:
+  path: wilma/ai_entity_summary.yaml
+  input:
+    source_entity: sensor.wilma_virppi_latest_message
+    source_attribute: content_markdown
+    language: sv
+    agent_id: conversation.google_ai_conversation
+    instructions: >-
+      Om texten är längre än 500 tecken, ge en kort sammanfattning på lätt svenska
+      i naturligt flytande språk men lätt uppställt för att läsa på en skärm.
+      Sammanfattningen får inte vara längre än 700 tecken.
+    summary_part_1: input_text.wilma_virppi_latest_message_summary_part_1
+    summary_part_2: input_text.wilma_virppi_latest_message_summary_part_2
+    summary_part_3: input_text.wilma_virppi_latest_message_summary_part_3
+```
+
+For helper setup, template sensor configuration, and Lovelace examples, see `wiki/AI-Summaries.md`.
+
 ### Notify on unexplained attendance mark
 
 ```yaml
@@ -120,13 +151,13 @@ automation:
 
 ```yaml
 type: entities
-title: Emma — today
+title: Virppi — today
 entities:
-  - entity: sensor.wilma_emma_next_lesson
+  - entity: sensor.wilma_virppi_next_lesson
     name: Next lesson
-  - entity: sensor.wilma_emma_attendance_marks
+  - entity: sensor.wilma_virppi_attendance_marks
     name: Attendance marks this year
-  - entity: calendar.wilma_emma_schedule
+  - entity: calendar.wilma_virppi_schedule
 ```
 
 ## Development

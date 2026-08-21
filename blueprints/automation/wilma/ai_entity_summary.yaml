@@ -1,0 +1,168 @@
+---
+blueprint:
+  name: AI summary for entity text
+  description: >-
+    Watches one source entity, optionally reads a text attribute from it,
+    sends the combined text to a conversation agent, and stores the reply
+    across multiple input_text helpers. Use a trigger-based template sensor
+    to expose the full summary as an attribute for Lovelace.
+  domain: automation
+  input:
+    source_entity:
+      name: Source entity
+      description: The entity that contains the text to summarise.
+      selector:
+        entity: {}
+
+    source_attribute:
+      name: Source attribute
+      description: >-
+        Optional. For example content_markdown. Leave empty to use only the
+        entity state.
+      default: ""
+      selector:
+        text: {}
+
+    instructions:
+      name: AI instructions
+      description: >-
+        Free-text prompt sent before the source text. Keep the requested
+        output under about 700 characters if you use three 255-character
+        helpers.
+      default: >-
+        Om texten är längre än 500 tecken, ge en kort sammanfattning på lätt
+        svenska i naturligt flytande språk men lätt uppställt för att läsa på
+        en skärm.
+        Sammanfattningen får inte vara längre än 700 tecken.
+      selector:
+        text:
+          multiline: true
+
+    language:
+      name: Language
+      default: sv
+      selector:
+        text: {}
+
+    agent_id:
+      name: Conversation agent
+      description: For example conversation.google_ai_conversation
+      default: conversation.google_ai_conversation
+      selector:
+        text: {}
+
+    summary_part_1:
+      name: Summary helper part 1
+      description: First input_text helper used to store the summary.
+      selector:
+        entity:
+          domain: input_text
+
+    summary_part_2:
+      name: Summary helper part 2
+      description: Second input_text helper used to store the summary.
+      selector:
+        entity:
+          domain: input_text
+
+    summary_part_3:
+      name: Summary helper part 3
+      description: Third input_text helper used to store the summary.
+      selector:
+        entity:
+          domain: input_text
+
+variables:
+  source_entity: !input source_entity
+  source_attribute: !input source_attribute
+  instructions: !input instructions
+  language: !input language
+  agent_id: !input agent_id
+  summary_part_1: !input summary_part_1
+  summary_part_2: !input summary_part_2
+  summary_part_3: !input summary_part_3
+  source_state_text: >-
+    {% set value = states(source_entity) %}
+    {% if value in ['unknown', 'unavailable', 'none', 'None', ''] %}
+      {{ '' }}
+    {% else %}
+      {{ value }}
+    {% endif %}
+  source_attribute_text: >-
+    {% if source_attribute | trim %}
+      {% set value = state_attr(source_entity, source_attribute) %}
+      {% if value is none %}
+        {{ '' }}
+      {% else %}
+        {{ value | string }}
+      {% endif %}
+    {% else %}
+      {{ '' }}
+    {% endif %}
+  source_text: >-
+    {% if source_state_text | trim and source_attribute_text | trim %}
+      {{ source_state_text | trim }}
+
+      {{ source_attribute_text | trim }}
+    {% elif source_attribute_text | trim %}
+      {{ source_attribute_text | trim }}
+    {% else %}
+      {{ source_state_text | trim }}
+    {% endif %}
+
+triggers:
+  - trigger: homeassistant
+    event: start
+
+  - trigger: event
+    event_type: state_changed
+    event_data:
+      entity_id: !input source_entity
+
+conditions:
+  - condition: template
+    value_template: "{{ source_text | trim != '' }}"
+
+actions:
+  - action: conversation.process
+    data:
+      language: "{{ language }}"
+      agent_id: "{{ agent_id }}"
+      text: >-
+        {{ instructions }}
+
+        Kalltext:
+
+        {{ source_text }}
+    response_variable: agent_response
+
+  - variables:
+      summary_text: >-
+        {{
+          agent_response.get('response', {}).get('speech', {}).get('plain', {}).get('speech', '')
+          | trim
+        }}
+      summary_text_part_1: "{{ summary_text[0:255] }}"
+      summary_text_part_2: "{{ summary_text[255:510] }}"
+      summary_text_part_3: "{{ summary_text[510:765] }}"
+
+  - action: input_text.set_value
+    target:
+      entity_id: !input summary_part_1
+    data:
+      value: "{{ summary_text_part_1 }}"
+
+  - action: input_text.set_value
+    target:
+      entity_id: !input summary_part_2
+    data:
+      value: "{{ summary_text_part_2 }}"
+
+  - action: input_text.set_value
+    target:
+      entity_id: !input summary_part_3
+    data:
+      value: "{{ summary_text_part_3 }}"
+
+mode: restart
+max_exceeded: silent

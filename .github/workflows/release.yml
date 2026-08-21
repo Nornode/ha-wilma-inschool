@@ -43,10 +43,7 @@ jobs:
 
       - name: Get release notes from annotated tag
         run: |
-          : > release-notes.md
-          if git cat-file -e "${{ github.ref_name }}^{tag}" 2>/dev/null; then
-            git tag -l --format='%(contents)' "${{ github.ref_name }}" > release-notes.md
-          fi
+          git for-each-ref --format='%(contents)' "refs/tags/${{ github.ref_name }}" > release-notes.md
 
           if ! grep -q '[^[:space:]]' release-notes.md; then
             printf '%s\n\n%s\n' \
@@ -55,12 +52,24 @@ jobs:
               > release-notes.md
           fi
 
+      - name: Check if GitHub release already exists
+        id: release_check
+        run: |
+          if gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Zip integration
         run: |
           cd custom_components/wilma
           zip -r "../../wilma-${{ steps.version.outputs.version }}.zip" .
 
       - name: Create GitHub release
+        if: steps.release_check.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
@@ -68,3 +77,9 @@ jobs:
           body_path: release-notes.md
           generate_release_notes: true
           files: "wilma-${{ steps.version.outputs.version }}.zip"
+
+      - name: Upload assets to existing release
+        if: steps.release_check.outputs.exists == 'true'
+        run: gh release upload "${{ github.ref_name }}" "wilma-${{ steps.version.outputs.version }}.zip" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
