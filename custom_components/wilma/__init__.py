@@ -14,7 +14,12 @@ from .coordinator import WilmaCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.CALENDAR]
+PLATFORMS: list[Platform] = [
+    Platform.BINARY_SENSOR,
+    Platform.SENSOR,
+    Platform.CALENDAR,
+    Platform.TEXT,
+]
 
 _ENGLISH_OBJECT_IDS: dict[str, str] = {
     "problem": "problem",
@@ -31,6 +36,15 @@ _ENGLISH_OBJECT_IDS: dict[str, str] = {
     "latest_attendance": "latest_attendance",
     "last_http_status": "last_http_status",
     "calendar": "schedule",
+    "latest_message_summary_part_1": "latest_message_summary_part_1",
+    "latest_message_summary_part_2": "latest_message_summary_part_2",
+    "latest_message_summary_part_3": "latest_message_summary_part_3",
+    "latest_bulletin_summary_part_1": "latest_bulletin_summary_part_1",
+    "latest_bulletin_summary_part_2": "latest_bulletin_summary_part_2",
+    "latest_bulletin_summary_part_3": "latest_bulletin_summary_part_3",
+    "latest_attendance_summary_part_1": "latest_attendance_summary_part_1",
+    "latest_attendance_summary_part_2": "latest_attendance_summary_part_2",
+    "latest_attendance_summary_part_3": "latest_attendance_summary_part_3",
 }
 
 
