@@ -21,48 +21,48 @@ A Home Assistant integration for the [Wilma](https://www.wilma.fi/) school platf
 Per-student entities live under the **Wilma {First name}** device (e.g. _Wilma Virppi_)
 and are named `sensor.wilma_{first_name}_{key}`.
 
-| Key | Type | Description |
-| --- | --- | --- |
-| `latest_message` | Sensor | Subject of the most recent message; full content in attributes |
-| `unread_count` | Sensor | Count of unread messages |
-| `latest_bulletin` | Sensor | Title of the most recent school bulletin; body in attributes |
-| `unread_bulletin_count` | Sensor | Count of bulletins not yet seen |
-| `next_lesson` | Sensor | Subject of the next upcoming lesson; start/end time, room and teacher in attributes |
-| `attendance_count` | Sensor | Total attendance marks this school year; `unexplained_count` and `by_type` breakdown in attributes |
-| `latest_attendance` | Sensor | Most recent mark type; date, lesson hour, subject code and teacher in attributes |
-| `summary_{key}` | Sensor | Stored AI summary; full text in the `summary` attribute. Created on demand — see [AI summaries](wiki/AI-Summaries.md) |
-| `last_update` | Sensor | Timestamp of the last successful refresh (diagnostic) |
-| `recent_message` | Binary sensor | On when the latest message is within the recent threshold |
-| `recent_bulletin` | Binary sensor | On when the latest bulletin is within the recent threshold |
-| `recent_attendance` | Binary sensor | On when the latest attendance mark is within the recent threshold |
-| `schedule` | Calendar | Full timetable — shows in the HA Calendar UI and supports date-range queries |
+| Key                     | Type          | Description                                                                                                           |
+| ----------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `latest_message`        | Sensor        | Subject of the most recent message; full content in attributes                                                        |
+| `unread_count`          | Sensor        | Count of unread messages                                                                                              |
+| `latest_bulletin`       | Sensor        | Title of the most recent school bulletin; body in attributes                                                          |
+| `unread_bulletin_count` | Sensor        | Count of bulletins not yet seen                                                                                       |
+| `next_lesson`           | Sensor        | Subject of the next upcoming lesson; start/end time, room and teacher in attributes                                   |
+| `attendance_count`      | Sensor        | Total attendance marks this school year; `unexplained_count` and `by_type` breakdown in attributes                    |
+| `latest_attendance`     | Sensor        | Most recent mark type; date, lesson hour, subject code and teacher in attributes                                      |
+| `summary_{key}`         | Sensor        | Stored AI summary; full text in the `summary` attribute. Created on demand — see [AI summaries](wiki/AI-Summaries.md) |
+| `last_update`           | Sensor        | Timestamp of the last successful refresh (diagnostic)                                                                 |
+| `recent_message`        | Binary sensor | On when the latest message is within the recent threshold                                                             |
+| `recent_bulletin`       | Binary sensor | On when the latest bulletin is within the recent threshold                                                            |
+| `recent_attendance`     | Binary sensor | On when the latest attendance mark is within the recent threshold                                                     |
+| `schedule`              | Calendar      | Full timetable — shows in the HA Calendar UI and supports date-range queries                                          |
 
 Two account-level entities live under a shared **Wilma** device:
 
-| Entity | Type | Description |
-| --- | --- | --- |
-| `binary_sensor.wilma_problem` | Binary sensor | On when the last refresh failed; error details in attributes |
-| `sensor.wilma_last_http_status` | Sensor | Last HTTP status seen while scraping (diagnostic) |
+| Entity                          | Type          | Description                                                  |
+| ------------------------------- | ------------- | ------------------------------------------------------------ |
+| `binary_sensor.wilma_problem`   | Binary sensor | On when the last refresh failed; error details in attributes |
+| `sensor.wilma_last_http_status` | Sensor        | Last HTTP status seen while scraping (diagnostic)            |
 
 ## Events
 
 All events include `entry_id`, `student_id` and `student_name`.
 
-| Event | Additional payload | When fired |
-| --- | --- | --- |
-| `wilma_new_message` | `message_id`, `subject`, `sender`, `timestamp`, `unread`, `content`, `content_html`, `content_markdown` | New message appears |
-| `wilma_new_bulletin` | `news_id`, `title`, `date`, `section`, `url`, `content_html`, `content_markdown` | New school bulletin appears |
-| `wilma_new_attendance_mark` | `mark` (dict with `date`, `day`, `lesson_hour`, `subject_code`, `mark_type`, `teacher`) | New attendance mark detected |
+| Event                       | Additional payload                                                                                      | When fired                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `wilma_new_message`         | `message_id`, `subject`, `sender`, `timestamp`, `unread`, `content`, `content_html`, `content_markdown` | New message appears          |
+| `wilma_new_bulletin`        | `news_id`, `title`, `date`, `section`, `url`, `content_html`, `content_markdown`                        | New school bulletin appears  |
+| `wilma_new_attendance_mark` | `mark` (dict with `date`, `day`, `lesson_hour`, `subject_code`, `mark_type`, `teacher`)                 | New attendance mark detected |
 
 ## Services
 
-| Service | Description |
-| --- | --- |
-| `wilma.refresh` | Force a data refresh |
-| `wilma.store_summary` | Persist an AI summary and the prompt that produced it |
-| `wilma.summary_status` | Ask whether a summary needs regenerating, without calling an agent |
-| `wilma.store_summary_error` | Record a failed generation attempt, keeping the previous summary |
-| `wilma.clear_summary` | Remove stored summaries |
+| Service                     | Description                                                        |
+| --------------------------- | ------------------------------------------------------------------ |
+| `wilma.refresh`             | Force a data refresh                                               |
+| `wilma.store_summary`       | Persist an AI summary and the prompt that produced it              |
+| `wilma.summary_status`      | Ask whether a summary needs regenerating, without calling an agent |
+| `wilma.store_summary_error` | Record a failed generation attempt, keeping the previous summary   |
+| `wilma.clear_summary`       | Remove stored summaries                                            |
 
 See [AI summaries](wiki/AI-Summaries.md) for the full field reference.
 
@@ -91,13 +91,13 @@ See [AI summaries](wiki/AI-Summaries.md) for the full field reference.
 
 Options can be changed at any time via **Configure** on the integration card:
 
-| Option | Default | Description |
-| --- | --- | --- |
-| Scan interval | 30 minutes | How often Wilma is polled |
-| Only unread | off | Fetch only unread messages |
-| No message content fetch limit | off | Fetch full content for every message, not just the newest few |
-| Recent threshold | 24 hours | How long the `recent_*` binary sensors stay on |
-| Language | Finnish | `langid` used for Wilma requests, which controls scraped label language |
+| Option                         | Default    | Description                                                             |
+| ------------------------------ | ---------- | ----------------------------------------------------------------------- |
+| Scan interval                  | 30 minutes | How often Wilma is polled                                               |
+| Only unread                    | off        | Fetch only unread messages                                              |
+| No message content fetch limit | off        | Fetch full content for every message, not just the newest few           |
+| Recent threshold               | 24 hours   | How long the `recent_*` binary sensors stay on                          |
+| Language                       | Finnish    | `langid` used for Wilma requests, which controls scraped label language |
 
 ## Automation Examples
 
@@ -186,10 +186,10 @@ Full setup, prompt debugging and card examples: [wiki/AI-Summaries.md](wiki/AI-S
 Two drop-in Lovelace configurations are included. Paste either into
 **Settings → Dashboards → your dashboard → ⋮ → Raw configuration editor**.
 
-| File | Needs HACS | Notes |
-| --- | --- | --- |
-| `dashboards/wilma_overview.yaml` | no | Zero configuration. Cards discover students via `integration_entities('wilma')`, so a new child appears automatically |
-| `dashboards/wilma_overview_decluttering.yaml` | yes (`decluttering-card`) | Real tiles and tap actions; each student is one block with a single `student:` variable |
+| File                                          | Needs HACS                | Notes                                                                                                                 |
+| --------------------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `dashboards/wilma_overview.yaml`              | no                        | Zero configuration. Cards discover students via `integration_entities('wilma')`, so a new child appears automatically |
+| `dashboards/wilma_overview_decluttering.yaml` | yes (`decluttering-card`) | Real tiles and tap actions; each student is one block with a single `student:` variable                               |
 
 See [wiki/Dashboards.md](wiki/Dashboards.md).
 
