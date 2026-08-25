@@ -4,17 +4,100 @@ from __future__ import annotations
 
 import logging
 
+import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
+from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import config_validation as cv, entity_registry
 
-from .const import CONF_PASSWORD, CONF_SERVER_URL, CONF_USERNAME, DOMAIN
+from .const import (
+    ATTR_AGENT_ID,
+    ATTR_ENTRY_ID,
+    ATTR_ERROR,
+    ATTR_GENERATED_BY,
+    ATTR_INSTRUCTIONS,
+    ATTR_MIN_LENGTH,
+    ATTR_PROMPT,
+    ATTR_SOURCE_ATTRIBUTE,
+    ATTR_SOURCE_ENTITY,
+    ATTR_SOURCE_ID,
+    ATTR_STUDENT,
+    ATTR_SUMMARY,
+    ATTR_SUMMARY_KEY,
+    ATTR_TITLE,
+    CONF_PASSWORD,
+    CONF_SERVER_URL,
+    CONF_USERNAME,
+    DEFAULT_SUMMARY_MIN_LENGTH,
+    DOMAIN,
+    GENERATED_BY_AGENT,
+    GENERATED_BY_PASSTHROUGH,
+    SERVICE_CLEAR_SUMMARY,
+    SERVICE_STORE_SUMMARY,
+    SERVICE_STORE_SUMMARY_ERROR,
+    SERVICE_SUMMARY_STATUS,
+)
 from .coordinator import WilmaCoordinator
+from .summary import WilmaSummaryStore, compose_source_text, source_fingerprint
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.CALENDAR]
+PLATFORMS: list[Platform] = [
+    Platform.BINARY_SENSOR,
+    Platform.SENSOR,
+    Platform.CALENDAR,
+]
+
+STORE_SUMMARY_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_SUMMARY_KEY): cv.string,
+        vol.Required(ATTR_SUMMARY): cv.string,
+        vol.Optional(ATTR_STUDENT): cv.string,
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Optional(ATTR_TITLE): cv.string,
+        vol.Optional(ATTR_PROMPT): cv.string,
+        vol.Optional(ATTR_INSTRUCTIONS): cv.string,
+        vol.Optional(ATTR_SOURCE_ENTITY): cv.string,
+        vol.Optional(ATTR_SOURCE_ATTRIBUTE): cv.string,
+        vol.Optional(ATTR_SOURCE_ID): cv.string,
+        vol.Optional("source_text"): cv.string,
+        vol.Optional(ATTR_AGENT_ID): cv.string,
+        vol.Optional(ATTR_GENERATED_BY): vol.In(
+            [GENERATED_BY_AGENT, GENERATED_BY_PASSTHROUGH]
+        ),
+    }
+)
+
+CLEAR_SUMMARY_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_SUMMARY_KEY): cv.string,
+        vol.Optional(ATTR_STUDENT): cv.string,
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+    }
+)
+
+SUMMARY_STATUS_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_SUMMARY_KEY): cv.string,
+        vol.Required(ATTR_SOURCE_ENTITY): cv.string,
+        vol.Optional(ATTR_SOURCE_ATTRIBUTE): cv.string,
+        vol.Optional(ATTR_STUDENT): cv.string,
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Optional(ATTR_MIN_LENGTH, default=DEFAULT_SUMMARY_MIN_LENGTH): vol.All(
+            vol.Coerce(int), vol.Range(min=0)
+        ),
+    }
+)
+
+STORE_SUMMARY_ERROR_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_SUMMARY_KEY): cv.string,
+        vol.Required(ATTR_ERROR): cv.string,
+        vol.Optional(ATTR_STUDENT): cv.string,
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+    }
+)
 
 _ENGLISH_OBJECT_IDS: dict[str, str] = {
     "problem": "problem",
@@ -130,10 +213,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Initial data fetch
     await coordinator.async_config_entry_first_refresh()
 
+    summary_store = WilmaSummaryStore(hass, entry.entry_id)
+    await summary_store.async_load()
+    coordinator.summaries = summary_store
+
     # Store coordinator
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
     _migrate_entity_names(hass, entry)
+
+    _async_register_services(hass)
 
     # Set up all platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -156,4 +245,177 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await coordinator.async_close_client()
         hass.data[DOMAIN].pop(entry.entry_id)
 
+        if not hass.data[DOMAIN]:
+            hass.services.async_remove(DOMAIN, SERVICE_STORE_SUMMARY)
+            hass.services.async_remove(DOMAIN, SERVICE_CLEAR_SUMMARY)
+            hass.services.async_remove(DOMAIN, SERVICE_SUMMARY_STATUS)
+            hass.services.async_remove(DOMAIN, SERVICE_STORE_SUMMARY_ERROR)
+
     return unload_ok
+
+
+def _resolve_coordinator(hass: HomeAssistant, entry_id: str | None) -> WilmaCoordinator:
+    """Return the coordinator for an explicit entry id, or the only loaded one."""
+    coordinators: dict[str, WilmaCoordinator] = hass.data.get(DOMAIN, {})
+
+    if entry_id:
+        coordinator = coordinators.get(entry_id)
+        if coordinator is None:
+            raise ServiceValidationError(f"No loaded Wilma config entry with id {entry_id}")
+        return coordinator
+
+    if len(coordinators) != 1:
+        raise ServiceValidationError(
+            "Multiple Wilma config entries are loaded; pass entry_id to select one"
+        )
+
+    return next(iter(coordinators.values()))
+
+
+def _resolve_student(
+    coordinator: WilmaCoordinator,
+    student: str | None,
+) -> tuple[str, str | None]:
+    """Resolve a student id or name into a (student_id, student_name) pair."""
+    profiles = [
+        profile
+        for profile in getattr(coordinator, "student_profiles", [])
+        if isinstance(profile, dict) and profile.get("id")
+    ]
+
+    if not student:
+        if len(profiles) == 1:
+            return profiles[0]["id"], profiles[0].get("name")
+        raise ServiceValidationError(
+            "Multiple students are configured; pass student to select one"
+        )
+
+    for profile in profiles:
+        if profile["id"] == student:
+            return profile["id"], profile.get("name")
+
+    wanted = WilmaCoordinator._slugify_object_id(student)
+    for profile in profiles:
+        name = profile.get("name") or ""
+        if name.lower() == student.lower():
+            return profile["id"], name
+        if name and WilmaCoordinator._slugify_object_id(name) == wanted:
+            return profile["id"], name
+
+    known = ", ".join(
+        f"{profile['id']} ({profile.get('name')})" for profile in profiles
+    )
+    raise ServiceValidationError(f"Unknown student {student!r}. Known students: {known}")
+
+
+def _async_register_services(hass: HomeAssistant) -> None:
+    """Register the summary services once for the whole integration."""
+    if hass.services.has_service(DOMAIN, SERVICE_STORE_SUMMARY):
+        return
+
+    async def _async_store_summary(call: ServiceCall) -> None:
+        coordinator = _resolve_coordinator(hass, call.data.get(ATTR_ENTRY_ID))
+        student_id, student_name = _resolve_student(coordinator, call.data.get(ATTR_STUDENT))
+
+        summary = call.data[ATTR_SUMMARY].strip()
+        if not summary:
+            raise ServiceValidationError("Refusing to store an empty summary")
+
+        source_entity = call.data.get(ATTR_SOURCE_ENTITY)
+        source_attribute = call.data.get(ATTR_SOURCE_ATTRIBUTE)
+        source_text = call.data.get("source_text")
+        if source_text is None and source_entity:
+            source_text = compose_source_text(hass, source_entity, source_attribute)
+
+        await coordinator.summaries.async_store(
+            student_id,
+            student_name,
+            call.data[ATTR_SUMMARY_KEY],
+            summary,
+            title=call.data.get(ATTR_TITLE),
+            prompt=call.data.get(ATTR_PROMPT),
+            instructions=call.data.get(ATTR_INSTRUCTIONS),
+            source_entity=source_entity,
+            source_attribute=source_attribute,
+            source_id=call.data.get(ATTR_SOURCE_ID),
+            source_text=source_text,
+            agent_id=call.data.get(ATTR_AGENT_ID),
+            generated_by=call.data.get(ATTR_GENERATED_BY, GENERATED_BY_AGENT),
+        )
+
+    async def _async_clear_summary(call: ServiceCall) -> None:
+        coordinator = _resolve_coordinator(hass, call.data.get(ATTR_ENTRY_ID))
+        student = call.data.get(ATTR_STUDENT)
+        student_id = None
+        if student:
+            student_id, _ = _resolve_student(coordinator, student)
+
+        await coordinator.summaries.async_clear(student_id, call.data.get(ATTR_SUMMARY_KEY))
+
+    async def _async_store_summary_error(call: ServiceCall) -> None:
+        coordinator = _resolve_coordinator(hass, call.data.get(ATTR_ENTRY_ID))
+        student_id, student_name = _resolve_student(coordinator, call.data.get(ATTR_STUDENT))
+
+        await coordinator.summaries.async_store_error(
+            student_id,
+            student_name,
+            call.data[ATTR_SUMMARY_KEY],
+            call.data[ATTR_ERROR],
+        )
+
+    async def _async_summary_status(call: ServiceCall) -> ServiceResponse:
+        coordinator = _resolve_coordinator(hass, call.data.get(ATTR_ENTRY_ID))
+        student_id, _ = _resolve_student(coordinator, call.data.get(ATTR_STUDENT))
+
+        key = call.data[ATTR_SUMMARY_KEY]
+        source_entity = call.data[ATTR_SOURCE_ENTITY]
+        source_attribute = call.data.get(ATTR_SOURCE_ATTRIBUTE)
+        min_length = call.data[ATTR_MIN_LENGTH]
+
+        source_text = compose_source_text(hass, source_entity, source_attribute)
+        source_hash = source_fingerprint(source_text)
+        record = coordinator.summaries.get(student_id, key)
+        stored_hash = record.get("source_hash") if record else None
+
+        if not source_text:
+            reason = "no_source"
+        elif stored_hash and stored_hash == source_hash:
+            reason = "unchanged"
+        elif len(source_text) < min_length:
+            reason = "too_short"
+        elif record is None:
+            reason = "no_summary"
+        else:
+            reason = "source_changed"
+
+        return {
+            "needs_update": reason in ("too_short", "no_summary", "source_changed"),
+            "call_agent": reason in ("no_summary", "source_changed"),
+            "reason": reason,
+            "source_text": source_text,
+            "source_hash": source_hash,
+            "source_length": len(source_text),
+            "stored_hash": stored_hash,
+            "min_length": min_length,
+            "student_id": student_id,
+        }
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_STORE_SUMMARY, _async_store_summary, schema=STORE_SUMMARY_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_CLEAR_SUMMARY, _async_clear_summary, schema=CLEAR_SUMMARY_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SUMMARY_STATUS,
+        _async_summary_status,
+        schema=SUMMARY_STATUS_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_STORE_SUMMARY_ERROR,
+        _async_store_summary_error,
+        schema=STORE_SUMMARY_ERROR_SCHEMA,
+    )

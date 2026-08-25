@@ -1,0 +1,124 @@
+# Wilma overview dashboard — decluttering-card variant
+#
+# Use this when you want real cards (tiles, tap actions, state colours) rather
+# than Markdown. It needs the decluttering-card frontend module from HACS:
+#   HACS > Frontend > "decluttering-card"
+#
+# The card layout is written once in decluttering_templates below. Each student
+# is then one short block that sets a single variable:
+#
+#   - type: custom:decluttering-card
+#     template: wilma_student
+#     variables:
+#       - student: virppi
+#       - name: Virppi
+#
+# Every [[student]] in the template is replaced with that slug, so adding a
+# child is four lines and changing a slug updates every entity reference for
+# that student at once.
+#
+# The slug is the part between "sensor.wilma_" and the entity name, for example
+# sensor.wilma_virppi_unread_count -> virppi.
+#
+# Paste into Settings > Dashboards > your dashboard > three dots >
+# "Raw configuration editor".
+
+decluttering_templates:
+  wilma_student:
+    default:
+      - student: student
+      - name: Wilma
+    card:
+      type: vertical-stack
+      cards:
+        - type: heading
+          heading: "[[name]]"
+          heading_style: title
+          icon: mdi:account-school
+
+        - type: tile
+          entity: sensor.wilma_[[student]]_next_lesson
+          name: Nästa lektion
+          icon: mdi:school
+          state_content:
+            - state
+            - room
+
+        - type: horizontal-stack
+          cards:
+            - type: tile
+              entity: sensor.wilma_[[student]]_unread_count
+              name: Olästa
+              icon: mdi:email-alert
+              color: blue
+            - type: tile
+              entity: sensor.wilma_[[student]]_unread_bulletin_count
+              name: Tiedotteet
+              icon: mdi:bullhorn
+              color: purple
+            - type: tile
+              entity: sensor.wilma_[[student]]_attendance_count
+              name: Frånvaro
+              icon: mdi:clipboard-alert
+              color: orange
+
+        - type: conditional
+          conditions:
+            - condition: state
+              entity: binary_sensor.wilma_[[student]]_recent_attendance
+              state: "on"
+          card:
+            type: tile
+            entity: sensor.wilma_[[student]]_latest_attendance
+            name: Ny frånvaromarkering
+            icon: mdi:clipboard-clock
+            color: red
+
+        - type: markdown
+          content: >-
+            {% set e = 'sensor.wilma_[[student]]_summary_latest_message' %}
+            {%- if states(e) not in ['unknown', 'unavailable'] %}
+            **{{ state_attr(e, 'title') or states(e) }}**
+
+            {{ state_attr(e, 'summary') }}
+
+            {% if state_attr(e, 'is_stale') -%}
+            ⚠️ _Källtexten har ändrats sedan sammanfattningen gjordes._
+            {%- endif %}
+            {%- else -%}
+            _Ingen sammanfattning ännu._
+            {%- endif %}
+
+        - type: calendar
+          initial_view: listWeek
+          entities:
+            - calendar.wilma_[[student]]_schedule
+
+views:
+  - title: Wilma
+    path: wilma
+    icon: mdi:school
+    type: sections
+    max_columns: 2
+    sections:
+      # One block per student. This is the only place a student is named.
+      - type: grid
+        cards:
+          - type: custom:decluttering-card
+            template: wilma_student
+            variables:
+              - student: virppi
+              - name: Virppi
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Diagnostik
+            heading_style: subtitle
+            icon: mdi:heart-pulse
+
+          - type: entities
+            entities:
+              - entity: binary_sensor.wilma_problem
+              - entity: sensor.wilma_last_http_status
+            state_color: true

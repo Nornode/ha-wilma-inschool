@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import zoneinfo
+from collections.abc import Callable
 from datetime import datetime, time as dt_time
 from typing import Any, Dict, Optional
 
@@ -13,26 +14,44 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    ATTR_AGENT_ID,
     ATTR_CONTENT,
     ATTR_CONTENT_MARKDOWN,
+    ATTR_ERROR_COUNT,
+    ATTR_GENERATED_AT,
+    ATTR_GENERATED_BY,
     ATTR_ID,
+    ATTR_INSTRUCTIONS,
+    ATTR_IS_STALE,
+    ATTR_LAST_ERROR,
+    ATTR_LAST_ERROR_AT,
     ATTR_NEWS_DATE,
     ATTR_NEWS_ID,
     ATTR_NEWS_SECTION,
     ATTR_NEWS_URL,
+    ATTR_PROMPT,
     ATTR_SENDER,
+    ATTR_SOURCE_ATTRIBUTE,
+    ATTR_SOURCE_ENTITY,
+    ATTR_SOURCE_HASH,
+    ATTR_SOURCE_ID,
+    ATTR_SOURCE_LENGTH,
     ATTR_STUDENT_ID,
     ATTR_STUDENT_NAME,
     ATTR_SUBJECT,
+    ATTR_SUMMARY,
     ATTR_TIMESTAMP,
+    ATTR_TITLE,
     DOMAIN,
     INTEGRATION_VERSION,
     SENSOR_ATTENDANCE_COUNT,
@@ -43,8 +62,11 @@ from .const import (
     SENSOR_NEXT_LESSON,
     SENSOR_UNREAD_BULLETIN_COUNT,
     SENSOR_UNREAD_COUNT,
+    SIGNAL_SUMMARY_ADDED,
+    SIGNAL_SUMMARY_UPDATED,
 )
 from .coordinator import WilmaCoordinator
+from .summary import compose_source_text, source_fingerprint
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -192,6 +214,55 @@ async def async_setup_entry(
         )
 
     async_add_entities(entities)
+
+    summary_store = getattr(coordinator, "summaries", None)
+    if summary_store is None:
+        return
+
+    student_names = {student["id"]: student["name"] for student in student_profiles}
+    known_summaries: set[tuple[str, str]] = set()
+
+    summary_entities = []
+    for student_id, key in summary_store.stored_keys():
+        record = summary_store.get(student_id, key) or {}
+        known_summaries.add((student_id, key))
+        summary_entities.append(
+            WilmaSummarySensor(
+                coordinator,
+                entry,
+                student_id,
+                student_names.get(student_id) or record.get("student_name") or student_id,
+                key,
+            )
+        )
+
+    if summary_entities:
+        async_add_entities(summary_entities)
+
+    @callback
+    def _async_summary_added(student_id: str, student_name: str | None, key: str) -> None:
+        if (student_id, key) in known_summaries:
+            return
+        known_summaries.add((student_id, key))
+        async_add_entities(
+            [
+                WilmaSummarySensor(
+                    coordinator,
+                    entry,
+                    student_id,
+                    student_names.get(student_id) or student_name or student_id,
+                    key,
+                )
+            ]
+        )
+
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass,
+            SIGNAL_SUMMARY_ADDED.format(entry.entry_id),
+            _async_summary_added,
+        )
+    )
 
 
 class WilmaBaseStudentSensor(CoordinatorEntity, SensorEntity):
@@ -550,3 +621,157 @@ class WilmaLastHttpStatusSensor(CoordinatorEntity, SensorEntity):
     def native_value(self) -> int | None:
         """Return the last HTTP status code observed, regardless of update success."""
         return self.coordinator.last_http_status
+
+
+class WilmaSummarySensor(CoordinatorEntity, SensorEntity):
+    """Expose one stored AI summary, with the full text in the summary attribute."""
+
+    _attr_icon = "mdi:text-box-search-outline"
+
+    def __init__(
+        self,
+        coordinator: WilmaCoordinator,
+        entry: ConfigEntry,
+        student_id: str,
+        student_name: str,
+        key: str,
+    ) -> None:
+        """Initialize the summary sensor."""
+        super().__init__(coordinator)
+        self._student_id = student_id
+        self._student_name = student_name
+        self._key = key
+        self._source_unsub: Callable[[], None] | None = None
+        first_name = student_name.split()[0] if student_name else student_name
+        self._attr_unique_id = f"{entry.entry_id}_{student_id}_summary_{key}"
+        self._attr_has_entity_name = True
+        self._attr_name = f"{key.replace('_', ' ').capitalize()} summary"
+        self.internal_integration_suggested_object_id = coordinator.entity_object_id(
+            f"summary_{key}",
+            student_name,
+        )
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, f"{entry.entry_id}_{student_id}")},
+            "name": f"Wilma {first_name}",
+            "manufacturer": "Visma",
+            "model": "Wilma",
+            "sw_version": INTEGRATION_VERSION,
+        }
+
+    async def async_added_to_hass(self) -> None:
+        """Refresh state whenever this summary is rewritten or cleared."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                SIGNAL_SUMMARY_UPDATED.format(self.coordinator.entry_id),
+                self._async_summary_updated,
+            )
+        )
+        self.async_on_remove(self._async_stop_tracking_source)
+        self._async_track_source()
+
+    @callback
+    def _async_stop_tracking_source(self) -> None:
+        if self._source_unsub is not None:
+            self._source_unsub()
+            self._source_unsub = None
+
+    @callback
+    def _async_track_source(self) -> None:
+        """Watch the summarised entity so is_stale stays current."""
+        self._async_stop_tracking_source()
+        record = self._record
+        source_entity = record.get("source_entity") if record else None
+        if not source_entity:
+            return
+
+        self._source_unsub = async_track_state_change_event(
+            self.hass, [source_entity], self._async_source_changed
+        )
+
+    @callback
+    def _async_source_changed(self, event: Event[EventStateChangedData]) -> None:
+        self.async_write_ha_state()
+
+    @callback
+    def _async_summary_updated(self, student_id: str, key: str) -> None:
+        if student_id == self._student_id and key == self._key:
+            self._async_track_source()
+            self.async_write_ha_state()
+
+    @property
+    def _record(self) -> dict[str, Any] | None:
+        store = getattr(self.coordinator, "summaries", None)
+        if store is None:
+            return None
+        return store.get(self._student_id, self._key)
+
+    @property
+    def available(self) -> bool:
+        """Stored summaries stay readable even when a Wilma fetch fails."""
+        return True
+
+    @property
+    def native_value(self) -> StateType:
+        """Return a short label; the full text lives in the summary attribute."""
+        record = self._record
+        if not record:
+            return None
+
+        label = record.get("title") or (record.get("summary") or "").strip()
+        label = label.splitlines()[0] if label else ""
+        if not label:
+            return None
+
+        return label[:252] + "..." if len(label) > 255 else label
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return the full summary plus the prompt that produced it."""
+        record = self._record
+        attrs: dict[str, Any] = {
+            ATTR_STUDENT_ID: self._student_id,
+            ATTR_STUDENT_NAME: self._student_name,
+            "summary_key": self._key,
+        }
+        if not record:
+            return attrs
+
+        attrs.update(
+            {
+                ATTR_SUMMARY: record.get("summary"),
+                ATTR_TITLE: record.get("title"),
+                ATTR_PROMPT: record.get("prompt"),
+                ATTR_INSTRUCTIONS: record.get("instructions"),
+                ATTR_SOURCE_ENTITY: record.get("source_entity"),
+                ATTR_SOURCE_ATTRIBUTE: record.get("source_attribute"),
+                ATTR_SOURCE_ID: record.get("source_id"),
+                ATTR_SOURCE_HASH: record.get("source_hash"),
+                ATTR_SOURCE_LENGTH: record.get("source_length"),
+                ATTR_AGENT_ID: record.get("agent_id"),
+                ATTR_GENERATED_BY: record.get("generated_by"),
+                ATTR_GENERATED_AT: record.get("generated_at"),
+                ATTR_IS_STALE: self._is_stale(record),
+                ATTR_LAST_ERROR: record.get("last_error"),
+                ATTR_LAST_ERROR_AT: record.get("last_error_at"),
+                ATTR_ERROR_COUNT: record.get("error_count", 0),
+                "history": record.get("history", []),
+            }
+        )
+        return attrs
+
+    def _is_stale(self, record: dict[str, Any]) -> bool | None:
+        """Return whether the source text has changed since the summary was made."""
+        source_entity = record.get("source_entity")
+        if not source_entity or not record.get("source_hash"):
+            return None
+
+        current = compose_source_text(
+            self.hass, source_entity, record.get("source_attribute")
+        )
+        if not current:
+            return None
+
+        return source_fingerprint(current) != record.get("source_hash")
+

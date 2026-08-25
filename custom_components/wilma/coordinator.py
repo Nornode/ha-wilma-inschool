@@ -1100,6 +1100,9 @@ class WilmaCoordinator(DataUpdateCoordinator):
                                 "sender": message.get("sender"),
                                 "timestamp": message.get("timestamp"),
                                 "unread": message.get("unread"),
+                                "content": message.get("content_markdown") or message.get("content_html"),
+                                "content_html": message.get("content_html"),
+                                "content_markdown": message.get("content_markdown"),
                             },
                         )
 

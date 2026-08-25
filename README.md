@@ -7,32 +7,65 @@ A Home Assistant integration for the [Wilma](https://www.wilma.fi/) school platf
 ## Features
 
 - **Multi-student support** — separate device per child, named _Wilma {First name}_
-- **Messages** — polls for new messages every 15 minutes, fires an event on each new one
-- **Schedule & Calendar** — fetches timetable for the current and upcoming weeks; exposes a native HA calendar entity per student and a _Next Lesson_ sensor
+- **Messages** — polls for new messages (every 30 minutes by default) and fires an event on each new one
+- **Bulletins** — scrapes school news, tracks which items are new and fires an event for each
+- **Schedule & Calendar** — fetches the timetable for the current and upcoming weeks; exposes a native HA calendar entity per student and a _Next Lesson_ sensor
 - **Attendance** — fetches the full school-year attendance history; tracks unexplained marks and fires an event when new marks appear
+- **AI summaries** — a blueprint plus services that store long AI summaries as real entities, with prompt history, staleness detection and token-saving skip rules
+- **Ready-made dashboards** — drop-in Lovelace YAML that discovers students automatically
 - **Multilingual UI** — config/options flow translated to English, Finnish and Swedish
+- **Built-in AI text storage** — optional `text` entities (disabled by default) for long-form summary chunks used by automations/blueprints
 - Configurable poll interval, unread-only mode and message-fetch limits
+- **AI-ready summaries** — includes a reusable blueprint pattern for long-form summaries of message and attendance text via Home Assistant conversation agents
 
 ## Entities
 
-All entities live under the **Wilma {First name}** device (e.g. _Wilma Emma_).
+All entities live under the **Wilma {First name}** device (e.g. _Wilma StudentA_).
 
-| Entity                   | Type     | Description                                                                                        |
-| ------------------------ | -------- | -------------------------------------------------------------------------------------------------- |
-| `latest_message`         | Sensor   | Subject of the most recent message; full content in attributes                                     |
-| `unread_messages`        | Sensor   | Count of unread messages                                                                           |
-| `next_lesson`            | Sensor   | Subject of the next upcoming lesson; start/end time, room and teacher in attributes                |
-| `attendance_marks`       | Sensor   | Total attendance marks this school year; `unexplained_count` and `by_type` breakdown in attributes |
-| `latest_attendance_mark` | Sensor   | Most recent mark type; date, lesson hour, subject code and teacher in attributes                   |
-| `last_update`            | Sensor   | Timestamp of the last successful coordinator refresh                                               |
-| `schedule`               | Calendar | Full timetable calendar — shows in the HA Calendar UI and supports date-range queries              |
+| Key                     | Type          | Description                                                                                                           |
+| ----------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `latest_message`        | Sensor        | Subject of the most recent message; full content in attributes                                                        |
+| `unread_count`          | Sensor        | Count of unread messages                                                                                              |
+| `latest_bulletin`       | Sensor        | Title of the most recent school bulletin; body in attributes                                                          |
+| `unread_bulletin_count` | Sensor        | Count of bulletins not yet seen                                                                                       |
+| `next_lesson`           | Sensor        | Subject of the next upcoming lesson; start/end time, room and teacher in attributes                                   |
+| `attendance_count`      | Sensor        | Total attendance marks this school year; `unexplained_count` and `by_type` breakdown in attributes                    |
+| `latest_attendance`     | Sensor        | Most recent mark type; date, lesson hour, subject code and teacher in attributes                                      |
+| `summary_{key}`         | Sensor        | Stored AI summary; full text in the `summary` attribute. Created on demand — see [AI summaries](wiki/AI-Summaries.md) |
+| `last_update`           | Sensor        | Timestamp of the last successful refresh (diagnostic)                                                                 |
+| `recent_message`        | Binary sensor | On when the latest message is within the recent threshold                                                             |
+| `recent_bulletin`       | Binary sensor | On when the latest bulletin is within the recent threshold                                                            |
+| `recent_attendance`     | Binary sensor | On when the latest attendance mark is within the recent threshold                                                     |
+| `schedule`              | Calendar      | Full timetable — shows in the HA Calendar UI and supports date-range queries                                          |
+
+Two account-level entities live under a shared **Wilma** device:
+
+| Entity                          | Type          | Description                                                  |
+| ------------------------------- | ------------- | ------------------------------------------------------------ |
+| `binary_sensor.wilma_problem`   | Binary sensor | On when the last refresh failed; error details in attributes |
+| `sensor.wilma_last_http_status` | Sensor        | Last HTTP status seen while scraping (diagnostic)            |
 
 ## Events
 
-| Event                       | Payload fields                                                            | When fired                                   |
-| --------------------------- | ------------------------------------------------------------------------- | -------------------------------------------- |
-| `wilma_new_message`         | `student_id`, `student_name`, `subject`, `sender`, `timestamp`, `content` | New message appears                          |
-| `wilma_new_attendance_mark` | `student_id`, `student_name`, `mark` (dict)                               | New attendance mark detected in full history |
+All events include `entry_id`, `student_id` and `student_name`.
+
+| Event                       | Additional payload                                                                                      | When fired                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `wilma_new_message`         | `message_id`, `subject`, `sender`, `timestamp`, `unread`, `content`, `content_html`, `content_markdown` | New message appears          |
+| `wilma_new_bulletin`        | `news_id`, `title`, `date`, `section`, `url`, `content_html`, `content_markdown`                        | New school bulletin appears  |
+| `wilma_new_attendance_mark` | `mark` (dict with `date`, `day`, `lesson_hour`, `subject_code`, `mark_type`, `teacher`)                 | New attendance mark detected |
+
+## Services
+
+| Service                     | Description                                                        |
+| --------------------------- | ------------------------------------------------------------------ |
+| `wilma.refresh`             | Force a data refresh                                               |
+| `wilma.store_summary`       | Persist an AI summary and the prompt that produced it              |
+| `wilma.summary_status`      | Ask whether a summary needs regenerating, without calling an agent |
+| `wilma.store_summary_error` | Record a failed generation attempt, keeping the previous summary   |
+| `wilma.clear_summary`       | Remove stored summaries                                            |
+
+See [AI summaries](wiki/AI-Summaries.md) for the full field reference.
 
 ## Installation
 
@@ -57,7 +90,15 @@ All entities live under the **Wilma {First name}** device (e.g. _Wilma Emma_).
 3. Enter your Wilma server URL (e.g. `https://espoo.inschool.fi`), username and password.
 4. Click **Submit**.
 
-Options (scan interval, unread-only, fetch limits) can be changed at any time via **Configure** on the integration card.
+Options can be changed at any time via **Configure** on the integration card:
+
+| Option                         | Default    | Description                                                             |
+| ------------------------------ | ---------- | ----------------------------------------------------------------------- |
+| Scan interval                  | 30 minutes | How often Wilma is polled                                               |
+| Only unread                    | off        | Fetch only unread messages                                              |
+| No message content fetch limit | off        | Fetch full content for every message, not just the newest few           |
+| Recent threshold               | 24 hours   | How long the `recent_*` binary sensors stay on                          |
+| Language                       | Finnish    | `langid` used for Wilma requests, which controls scraped label language |
 
 ## Automation Examples
 
@@ -78,6 +119,9 @@ automation:
 
 ### AI-summarise a new message
 
+For a one-off notification you can call an agent directly. For anything you want
+to keep and display, use the blueprint described under [AI Summaries](#ai-summaries).
+
 ```yaml
 automation:
   - alias: "Wilma — AI message summary"
@@ -90,13 +134,53 @@ automation:
           agent_id: homeassistant
           text: >
             Summarise this school message briefly:
-            {{ trigger.event.data.content }}
+            {{ trigger.event.data.content_markdown or trigger.event.data.content }}
         response_variable: summary
       - service: notify.mobile_app_your_phone
         data:
           title: "Wilma — {{ trigger.event.data.sender }}"
           message: "{{ summary.response.speech.plain.speech }}"
 ```
+
+## AI Summaries
+
+Wilma messages are often long. This repository ships a blueprint that sends the
+text to a Home Assistant conversation agent and stores the reply as a real
+entity, so it can be rendered on a dashboard instead of only pushed to a phone.
+
+- Blueprint: `blueprints/automation/wilma/ai_entity_summary.yaml`
+- Storage: the `wilma.store_summary` service, persisted across restarts
+- Result: `sensor.wilma_{first_name}_summary_{key}` with the full text in the
+  `summary` attribute — no length limit and no helper entities to create
+
+The integration never calls a conversation agent itself. The blueprint owns the
+prompt, so the instructions stay yours to edit, and the exact prompt used is
+stored alongside each summary for debugging.
+
+To save tokens, the blueprint asks `wilma.summary_status` before each run and
+skips the agent when the source text is unchanged, shorter than a configurable
+minimum, or missing. Short messages are stored verbatim so the card is never
+empty.
+
+```yaml
+alias: Wilma Virppi latest message AI summary
+use_blueprint:
+  path: wilma/ai_entity_summary.yaml
+  input:
+    source_entity: sensor.wilma_virppi_latest_message
+    source_attribute: content_markdown
+    summary_key: latest_message
+    student: Virppi
+    language: sv
+    min_length: 500
+    agent_id: conversation.google_ai_conversation
+    instructions: >-
+      Sammanfatta texten på lätt svenska i naturligt flytande språk, lätt
+      uppställt för att läsa på en skärm. Lyft fram datum, tider och sådant
+      som kräver en åtgärd av vårdnadshavaren.
+```
+
+Full setup, prompt debugging and card examples: [wiki/AI-Summaries.md](wiki/AI-Summaries.md).
 
 ### Notify on unexplained attendance mark
 
@@ -120,13 +204,13 @@ automation:
 
 ```yaml
 type: entities
-title: Emma — today
+title: StudentA — today
 entities:
-  - entity: sensor.wilma_emma_next_lesson
+  - entity: sensor.wilma_studenta_next_lesson
     name: Next lesson
-  - entity: sensor.wilma_emma_attendance_marks
+  - entity: sensor.wilma_studenta_attendance_marks
     name: Attendance marks this year
-  - entity: calendar.wilma_emma_schedule
+  - entity: calendar.wilma_studenta_schedule
 ```
 
 ## Development
