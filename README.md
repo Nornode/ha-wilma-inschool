@@ -45,16 +45,6 @@ Two account-level entities live under a shared **Wilma** device:
 | `binary_sensor.wilma_problem`   | Binary sensor | On when the last refresh failed; error details in attributes |
 | `sensor.wilma_last_http_status` | Sensor        | Last HTTP status seen while scraping (diagnostic)            |
 
-Additional optional text entities (all disabled by default, 255 characters each):
-
-- `latest_message_summary_part_1`, `latest_message_summary_part_2`, `latest_message_summary_part_3`
-- `latest_bulletin_summary_part_1`, `latest_bulletin_summary_part_2`, `latest_bulletin_summary_part_3`
-- `latest_attendance_summary_part_1`, `latest_attendance_summary_part_2`, `latest_attendance_summary_part_3`
-
-For each `*_summary_part_1` text entity, the full concatenated summary is also exposed
-in the `summary` attribute (with `summary_length`), which supports long text beyond
-255 characters.
-
 ## Events
 
 All events include `entry_id`, `student_id` and `student_name`.
@@ -154,11 +144,14 @@ automation:
 
 ## AI Summaries
 
-Home Assistant can return a response from `conversation.process`, but a normal entity state can only store 255 characters. For longer summaries, this repository includes a reusable blueprint that stores the AI reply across multiple text entities and exposes the full text through a template sensor attribute.
+Wilma messages are often long. This repository ships a blueprint that sends the
+text to a Home Assistant conversation agent and stores the reply as a real
+entity, so it can be rendered on a dashboard instead of only pushed to a phone.
 
-- Blueprint file: `blueprints/automation/wilma/ai_entity_summary.yaml`
-- Best for: `latest_message`, `latest_attendance_mark`, and any future text-heavy Wilma sensors
-- Storage model: source-specific sets of 3 x `text` entities from this integration (or `input_text` helpers), then one template sensor with a `summary` attribute
+- Blueprint: `blueprints/automation/wilma/ai_entity_summary.yaml`
+- Storage: the `wilma.store_summary` service, persisted across restarts
+- Result: `sensor.wilma_{first_name}_summary_{key}` with the full text in the
+  `summary` attribute — no length limit and no helper entities to create
 
 The integration never calls a conversation agent itself. The blueprint owns the
 prompt, so the instructions stay yours to edit, and the exact prompt used is
@@ -170,11 +163,11 @@ minimum, or missing. Short messages are stored verbatim so the card is never
 empty.
 
 ```yaml
-alias: Wilma StudentA latest message AI summary
+alias: Wilma Virppi latest message AI summary
 use_blueprint:
   path: wilma/ai_entity_summary.yaml
   input:
-    source_entity: sensor.wilma_studenta_latest_message
+    source_entity: sensor.wilma_virppi_latest_message
     source_attribute: content_markdown
     summary_key: latest_message
     student: Virppi
@@ -182,23 +175,12 @@ use_blueprint:
     min_length: 500
     agent_id: conversation.google_ai_conversation
     instructions: >-
-      Om texten är längre än 500 tecken, ge en kort sammanfattning på lätt svenska
-      i naturligt flytande språk men lätt uppställt för att läsa på en skärm.
-      Sammanfattningen får inte vara längre än 700 tecken.
-    summary_part_1: text.wilma_studenta_latest_message_summary_part_1
-    summary_part_2: text.wilma_studenta_latest_message_summary_part_2
-    summary_part_3: text.wilma_studenta_latest_message_summary_part_3
+      Sammanfatta texten på lätt svenska i naturligt flytande språk, lätt
+      uppställt för att läsa på en skärm. Lyft fram datum, tider och sådant
+      som kräver en åtgärd av vårdnadshavaren.
 ```
 
-Source-specific blueprint variants are also available:
-
-- `blueprints/automation/wilma/ai_latest_message_summary_to_text.yaml`
-- `blueprints/automation/wilma/ai_latest_bulletin_summary_to_text.yaml`
-- `blueprints/automation/wilma/ai_latest_attendance_summary_to_text.yaml`
-
-All three variants include an editable `llm_instructions` input so you can tune the prompt text without changing Python code.
-
-For helper setup, template sensor configuration, and Lovelace examples, see `wiki/AI-Summaries.md`.
+Full setup, prompt debugging and card examples: [wiki/AI-Summaries.md](wiki/AI-Summaries.md).
 
 ### Notify on unexplained attendance mark
 

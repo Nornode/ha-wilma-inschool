@@ -167,9 +167,6 @@ class WilmaCoordinator(DataUpdateCoordinator):
             last_update = "Viimeisin päivitys"
             problem = "Ongelma"
             http_status = "Viimeisin HTTP-tila"
-            summary_part_1 = "AI-yhteenveto osa 1"
-            summary_part_2 = "AI-yhteenveto osa 2"
-            summary_part_3 = "AI-yhteenveto osa 3"
             schedule_name = self.ui_labels.get("schedule", "Opiskelijan työjärjestys")
             next_lesson = "Seuraava tunti"
             bulletin_latest = f"{latest_prefix} {bulletin_singular}"
@@ -184,9 +181,6 @@ class WilmaCoordinator(DataUpdateCoordinator):
             last_update = "Senaste uppdatering"
             problem = "Problem"
             http_status = "Senaste HTTP-status"
-            summary_part_1 = "AI-sammanfattning del 1"
-            summary_part_2 = "AI-sammanfattning del 2"
-            summary_part_3 = "AI-sammanfattning del 3"
             schedule_name = self.ui_labels.get("schedule", "Studerandens schema")
             next_lesson = "Nästa lektion"
             bulletin_latest = f"{latest_prefix} {bulletin_singular}"
@@ -201,9 +195,6 @@ class WilmaCoordinator(DataUpdateCoordinator):
             last_update = "Last update"
             problem = "Problem"
             http_status = "Last HTTP status"
-            summary_part_1 = "AI summary part 1"
-            summary_part_2 = "AI summary part 2"
-            summary_part_3 = "AI summary part 3"
             schedule_name = self.ui_labels.get("schedule", "Schedule")
             next_lesson = "Next lesson"
             bulletin_latest = f"{latest_prefix} {bulletin_singular}"
@@ -228,15 +219,6 @@ class WilmaCoordinator(DataUpdateCoordinator):
             "latest_attendance": attendance_latest,
             "last_http_status": http_status,
             "schedule": schedule_name,
-            "latest_message_summary_part_1": f"{message_latest} {summary_part_1}",
-            "latest_message_summary_part_2": f"{message_latest} {summary_part_2}",
-            "latest_message_summary_part_3": f"{message_latest} {summary_part_3}",
-            "latest_bulletin_summary_part_1": f"{bulletin_latest} {summary_part_1}",
-            "latest_bulletin_summary_part_2": f"{bulletin_latest} {summary_part_2}",
-            "latest_bulletin_summary_part_3": f"{bulletin_latest} {summary_part_3}",
-            "latest_attendance_summary_part_1": f"{attendance_latest} {summary_part_1}",
-            "latest_attendance_summary_part_2": f"{attendance_latest} {summary_part_2}",
-            "latest_attendance_summary_part_3": f"{attendance_latest} {summary_part_3}",
         }
 
         return mapping.get(entity_key, entity_key)
