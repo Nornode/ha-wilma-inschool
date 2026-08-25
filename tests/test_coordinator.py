@@ -85,6 +85,76 @@ async def test_coordinator_fires_new_bulletin_event_on_refresh(hass, mock_wilma_
                 MOCK_NEWS_PAGES["!STUDENT1"] = original_news_page
 
 
+async def test_coordinator_fires_new_message_event_with_content(hass, mock_wilma_client):
+    """Test new message events include message content."""
+    coordinator = WilmaCoordinator(
+        hass, "https://test.inschool.fi", "testuser", "testpass", "test_entry_id"
+    )
+
+    await coordinator._async_update_data()
+
+    from tests.conftest import MockWilmaMessage
+
+    student_messages = {
+        "!STUDENT1": [
+            MockWilmaMessage(
+                3,
+                "Brand new message",
+                "Sender 3",
+                "2023-01-04 12:00",
+                True,
+                "<p>Brand new message body.</p>",
+            ),
+            MockWilmaMessage(
+                1,
+                "Test Message 1",
+                "Sender 1",
+                "2023-01-02 12:00",
+                True,
+                "<p>Test content 1</p>",
+            ),
+            MockWilmaMessage(
+                2,
+                "Test Message 2",
+                "Sender 2",
+                "2023-01-01 12:00",
+                False,
+                "<p>Test content 2</p>",
+            ),
+        ],
+        "!STUDENT2": [
+            MockWilmaMessage(
+                11,
+                "Test Message 11",
+                "Sender 11",
+                "2023-01-03 12:00",
+                True,
+                "<p>Test content 11</p>",
+            )
+        ],
+    }
+
+    async def get_messages(**kwargs):
+        return student_messages.get(mock_wilma_client.user_id, [])
+
+    mock_wilma_client.get_messages.side_effect = get_messages
+    events: list[dict] = []
+
+    def _capture(event):
+        events.append(event.data)
+
+    hass.bus.async_listen("wilma_new_message", _capture)
+
+    await coordinator._async_update_data()
+    await hass.async_block_till_done()
+
+    event = next(event for event in events if event.get("message_id") == 3)
+    assert event["subject"] == "Brand new message"
+    assert event["content_html"] == "<p>Brand new message body.</p>"
+    assert event["content_markdown"] == "Markdown version of: <p>Brand new message body.</p>"
+    assert event["content"] == event["content_markdown"]
+
+
 async def test_coordinator_auth_error(hass):
     """Test authentication error handling in coordinator."""
     client = MagicMock()

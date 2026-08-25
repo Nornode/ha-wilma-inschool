@@ -6,8 +6,11 @@ A Home Assistant integration for the [Wilma](https://www.vismasolutions.com/fi/p
 
 - **Multi-student support** — a separate HA device per child, named _Wilma {First name}_
 - **Messages** — polls for new messages and fires a `wilma_new_message` event on each new one
+- **Bulletins** — tracks school news and fires a `wilma_new_bulletin` event
 - **Schedule & Calendar** — fetches the weekly timetable; provides a native HA calendar entity and a _Next Lesson_ sensor per student
 - **Attendance** — full school-year attendance history with unexplained mark count and a `wilma_new_attendance_mark` event
+- **AI summaries** — a blueprint and services that turn long Wilma messages into dashboard-ready summary entities
+- **Ready-made dashboards** — drop-in Lovelace YAML that finds your students automatically
 - **Multilingual** — UI translated to English, Finnish and Swedish
 
 ## Quick Start

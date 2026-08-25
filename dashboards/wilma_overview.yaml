@@ -1,0 +1,228 @@
+# Wilma overview dashboard
+#
+# Paste this into Settings > Dashboards > your dashboard > three dots >
+# "Raw configuration editor".
+#
+# There is nothing to edit. Every card discovers students at render time with
+# integration_entities('wilma'), so a second child appearing in Wilma shows up
+# here on its own, and student names come from the student_name attribute
+# rather than from anything hard-coded.
+#
+# If you would rather pin the list, replace the discovery block at the top of a
+# card with:
+#
+#   {% set ns = namespace(students=['virppi', 'castalia']) %}
+#
+# The slug is the part of the entity id between "sensor.wilma_" and the entity
+# name, for example sensor.wilma_virppi_unread_count -> virppi.
+#
+# For real cards (tiles, buttons, tap actions) instead of Markdown, see
+# wilma_overview_decluttering.yaml, which uses the HACS decluttering-card and
+# takes the student name as a variable in one place per student.
+
+views:
+  - title: Wilma
+    path: wilma
+    icon: mdi:school
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Idag
+            heading_style: title
+            icon: mdi:calendar-today
+
+          - type: markdown
+            content: >-
+              {% set ns = namespace(students=[]) %}
+              {%- for e in integration_entities('wilma') -%}
+              {%- if e.startswith('sensor.wilma_') and e.endswith('_unread_count') -%}
+              {%- set ns.students = ns.students + [e[13:-13]] -%}
+              {%- endif -%}
+              {%- endfor -%}
+
+              {%- if not ns.students %}
+              _Inga Wilma-elever hittades._
+              {%- endif -%}
+
+              {%- for s in ns.students %}
+              {%- set p = 'sensor.wilma_' ~ s ~ '_' %}
+              {%- set b = 'binary_sensor.wilma_' ~ s ~ '_' %}
+              {%- set name = state_attr(p ~ 'unread_count', 'student_name') or s | capitalize %}
+
+              ## {{ name }}
+
+              {% set lesson = states(p ~ 'next_lesson') -%}
+              {%- if lesson not in ['unknown', 'unavailable', 'None'] -%}
+              {%- set start = state_attr(p ~ 'next_lesson', 'start_time') -%}
+              {%- set room = state_attr(p ~ 'next_lesson', 'room') -%}
+              **Nästa lektion:** {{ lesson }}
+              {%- if start %} · {{ as_timestamp(start) | timestamp_custom('%a %H:%M') }}{% endif %}
+              {%- if room %} · {{ room }}{% endif %}
+              {%- else -%}
+              **Nästa lektion:** inga fler lektioner inlagda
+              {%- endif %}
+
+              {% set unread = states(p ~ 'unread_count') | int(0) -%}
+              {%- set unread_bulletins = states(p ~ 'unread_bulletin_count') | int(0) -%}
+              {%- set unexplained = state_attr(p ~ 'attendance_count', 'unexplained_count') | int(0) %}
+              {% if unread %}📬 **{{ unread }}** olästa meddelanden{% else %}📭 Inga olästa meddelanden{% endif %}
+              {% if unread_bulletins %}
+              📢 **{{ unread_bulletins }}** olästa tiedotteet
+              {%- endif %}
+              {% if unexplained %}
+              ⚠️ **{{ unexplained }}** oförklarade frånvaromarkeringar
+              {%- endif %}
+              {%- if is_state(b ~ 'recent_attendance', 'on') %}
+              🕒 Ny frånvaromarkering: {{ states(p ~ 'latest_attendance') }}
+              ({{ state_attr(p ~ 'latest_attendance', 'date') }},
+              {{ state_attr(p ~ 'latest_attendance', 'subject_code') }})
+              {%- endif %}
+              {% endfor %}
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: AI-sammanfattningar
+            heading_style: title
+            icon: mdi:text-box-search-outline
+
+          - type: markdown
+            content: >-
+              {% set ns = namespace(found=false) %}
+              {%- for e in integration_entities('wilma') | sort -%}
+              {%- if e.startswith('sensor.wilma_') and '_summary_' in e
+                     and states(e) not in ['unknown', 'unavailable'] -%}
+              {%- set ns.found = true -%}
+              {%- set name = state_attr(e, 'student_name') or '' -%}
+              {%- set key = state_attr(e, 'summary_key') or '' %}
+
+              ### {{ name }} — {{ key | replace('_', ' ') }}
+
+              {% if state_attr(e, 'title') -%}
+              **{{ state_attr(e, 'title') }}**
+              {% endif %}
+              {{ state_attr(e, 'summary') }}
+
+              {% if state_attr(e, 'is_stale') -%}
+              ⚠️ _Källtexten har ändrats sedan sammanfattningen gjordes._
+              {% endif -%}
+              {%- if state_attr(e, 'generated_by') == 'passthrough' -%}
+              _Kort text, visas i original._
+              {% endif -%}
+              {%- set at = state_attr(e, 'generated_at') -%}
+              {%- if at %}
+              <small>{{ relative_time(as_datetime(at)) }} sedan</small>
+              {%- endif %}
+
+              ---
+              {%- endif -%}
+              {%- endfor -%}
+
+              {%- if not ns.found %}
+              _Inga sammanfattningar lagrade ännu. Skapa en automation från
+              blueprinten "AI summary for entity text"._
+              {%- endif %}
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Sammanfattningshistorik
+            heading_style: subtitle
+            icon: mdi:history
+
+          - type: markdown
+            content: >-
+              {% set ns = namespace(found=false) %}
+              {%- for e in integration_entities('wilma') | sort -%}
+              {%- if e.startswith('sensor.wilma_') and '_summary_' in e -%}
+              {%- set err = state_attr(e, 'last_error') -%}
+              {%- set history = state_attr(e, 'history') or [] -%}
+              {%- if err or history -%}
+              {%- set ns.found = true %}
+
+              ### {{ state_attr(e, 'student_name') or '' }} —
+              {{- ' ' }}{{ (state_attr(e, 'summary_key') or '') | replace('_', ' ') }}
+
+              {% if err -%}
+              ❌ **Senaste försöket misslyckades**
+              ({{ state_attr(e, 'error_count') }} i rad): {{ err }}
+              {% endif -%}
+
+              {%- for old in history[:3] %}
+              <details><summary>{{ old.generated_at | default('tidigare', true) }}</summary>
+
+              {{ old.summary }}
+
+              </details>
+              {%- endfor %}
+
+              ---
+              {%- endif -%}
+              {%- endif -%}
+              {%- endfor -%}
+
+              {%- if not ns.found %}
+              _Ingen historik och inga fel._
+              {%- endif %}
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Senaste meddelandet
+            heading_style: title
+            icon: mdi:email
+
+          - type: markdown
+            content: >-
+              {% set ns = namespace(students=[]) %}
+              {%- for e in integration_entities('wilma') -%}
+              {%- if e.startswith('sensor.wilma_') and e.endswith('_unread_count') -%}
+              {%- set ns.students = ns.students + [e[13:-13]] -%}
+              {%- endif -%}
+              {%- endfor -%}
+
+              {%- for s in ns.students %}
+              {%- set m = 'sensor.wilma_' ~ s ~ '_latest_message' %}
+              {%- if states(m) not in ['unknown', 'unavailable'] %}
+
+              ### {{ state_attr(m, 'student_name') or s | capitalize }}
+
+              **{{ states(m) }}**
+              {{ state_attr(m, 'sender') }} · {{ state_attr(m, 'timestamp') }}
+              {%- if state_attr(m, 'unread') %} · 🔵 oläst{% endif %}
+
+              {{ state_attr(m, 'content_markdown') or '' }}
+
+              ---
+              {%- endif -%}
+              {%- endfor %}
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Schema
+            heading_style: title
+            icon: mdi:calendar-month
+
+          # Calendar cards take a fixed entity list, so this is the one place
+          # you add a line per student.
+          - type: calendar
+            initial_view: listWeek
+            entities:
+              - calendar.wilma_virppi_schedule
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Diagnostik
+            heading_style: subtitle
+            icon: mdi:heart-pulse
+
+          - type: entities
+            entities:
+              - entity: binary_sensor.wilma_problem
+              - entity: sensor.wilma_last_http_status
+            state_color: true

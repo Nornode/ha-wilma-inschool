@@ -3,9 +3,10 @@ blueprint:
   name: AI summary for entity text
   description: >-
     Watches one source entity, optionally reads a text attribute from it,
-    sends the combined text to a conversation agent, and stores the reply
-    across multiple input_text helpers. Use a trigger-based template sensor
-    to expose the full summary as an attribute for Lovelace.
+    sends the combined text to a conversation agent, and stores the reply in
+    the Wilma integration via wilma.store_summary. The stored summary appears
+    as a sensor whose summary attribute holds the full text, ready for a
+    Markdown card. No input_text helpers are needed.
   domain: automation
   input:
     source_entity:
@@ -23,20 +24,59 @@ blueprint:
       selector:
         text: {}
 
+    summary_key:
+      name: Summary key
+      description: >-
+        Identifier for this summary. It names the resulting sensor, so
+        latest_message becomes sensor.wilma_<student>_summary_latest_message.
+      default: latest_message
+      selector:
+        text: {}
+
+    student:
+      name: Student
+      description: >-
+        Student name or Wilma id. Leave empty when only one student is
+        configured.
+      default: ""
+      selector:
+        text: {}
+
     instructions:
       name: AI instructions
       description: >-
-        Free-text prompt sent before the source text. Keep the requested
-        output under about 700 characters if you use three 255-character
-        helpers.
+        Free-text prompt sent before the source text. There is no storage
+        limit on the reply, so ask for whatever length and shape you want.
       default: >-
-        Om texten är längre än 500 tecken, ge en kort sammanfattning på lätt
-        svenska i naturligt flytande språk men lätt uppställt för att läsa på
-        en skärm.
-        Sammanfattningen får inte vara längre än 700 tecken.
+        Sammanfatta texten på lätt svenska i naturligt flytande språk, lätt
+        uppställt för att läsa på en skärm. Lyft fram datum, tider och sådant
+        som kräver en åtgärd av vårdnadshavaren.
       selector:
         text:
           multiline: true
+
+    min_length:
+      name: Minimum length before summarising
+      description: >-
+        Source texts shorter than this are not sent to the agent, since a short
+        message is already readable as-is.
+      default: 500
+      selector:
+        number:
+          min: 0
+          max: 10000
+          step: 50
+          unit_of_measurement: characters
+          mode: box
+
+    short_text_passthrough:
+      name: Store short texts unchanged
+      description: >-
+        When the source is below the minimum length, store the original text as
+        the summary so the dashboard card is never empty.
+      default: true
+      selector:
+        boolean: {}
 
     language:
       name: Language
@@ -51,118 +91,120 @@ blueprint:
       selector:
         text: {}
 
-    summary_part_1:
-      name: Summary helper part 1
-      description: First input_text helper used to store the summary.
-      selector:
-        entity:
-          domain: input_text
-
-    summary_part_2:
-      name: Summary helper part 2
-      description: Second input_text helper used to store the summary.
-      selector:
-        entity:
-          domain: input_text
-
-    summary_part_3:
-      name: Summary helper part 3
-      description: Third input_text helper used to store the summary.
-      selector:
-        entity:
-          domain: input_text
-
 variables:
   source_entity: !input source_entity
   source_attribute: !input source_attribute
+  summary_key: !input summary_key
+  student: !input student
   instructions: !input instructions
   language: !input language
   agent_id: !input agent_id
-  summary_part_1: !input summary_part_1
-  summary_part_2: !input summary_part_2
-  summary_part_3: !input summary_part_3
-  source_state_text: >-
-    {% set value = states(source_entity) %}
-    {% if value in ['unknown', 'unavailable', 'none', 'None', ''] %}
-      {{ '' }}
-    {% else %}
-      {{ value }}
-    {% endif %}
-  source_attribute_text: >-
-    {% if source_attribute | trim %}
-      {% set value = state_attr(source_entity, source_attribute) %}
-      {% if value is none %}
-        {{ '' }}
-      {% else %}
-        {{ value | string }}
-      {% endif %}
-    {% else %}
-      {{ '' }}
-    {% endif %}
-  source_text: >-
-    {% if source_state_text | trim and source_attribute_text | trim %}
-      {{ source_state_text | trim }}
-
-      {{ source_attribute_text | trim }}
-    {% elif source_attribute_text | trim %}
-      {{ source_attribute_text | trim }}
-    {% else %}
-      {{ source_state_text | trim }}
-    {% endif %}
+  min_length: !input min_length
+  short_text_passthrough: !input short_text_passthrough
 
 triggers:
   - trigger: homeassistant
     event: start
 
-  - trigger: event
-    event_type: state_changed
-    event_data:
-      entity_id: !input source_entity
-
-conditions:
-  - condition: template
-    value_template: "{{ source_text | trim != '' }}"
+  - trigger: state
+    entity_id: !input source_entity
 
 actions:
-  - action: conversation.process
+  # The integration composes the source text and decides whether a call is worth it.
+  - action: wilma.summary_status
     data:
-      language: "{{ language }}"
-      agent_id: "{{ agent_id }}"
-      text: >-
-        {{ instructions }}
+      key: "{{ summary_key }}"
+      student: "{{ student }}"
+      source_entity: "{{ source_entity }}"
+      source_attribute: "{{ source_attribute }}"
+      min_length: "{{ min_length }}"
+    response_variable: status
 
-        Kalltext:
-
-        {{ source_text }}
-    response_variable: agent_response
+  - condition: template
+    value_template: "{{ status.needs_update }}"
 
   - variables:
-      summary_text: >-
-        {{
-          agent_response.get('response', {}).get('speech', {}).get('plain', {}).get('speech', '')
-          | trim
-        }}
-      summary_text_part_1: "{{ summary_text[0:255] }}"
-      summary_text_part_2: "{{ summary_text[255:510] }}"
-      summary_text_part_3: "{{ summary_text[510:765] }}"
+      source_text: "{{ status.source_text }}"
+      source_id: >-
+        {{ state_attr(source_entity, 'id') or state_attr(source_entity, 'news_id') or '' }}
+      title: "{{ state_attr(source_entity, 'subject') or states(source_entity) }}"
 
-  - action: input_text.set_value
-    target:
-      entity_id: !input summary_part_1
-    data:
-      value: "{{ summary_text_part_1 }}"
+  - if:
+      - condition: template
+        value_template: "{{ not status.call_agent }}"
+    then:
+      - condition: template
+        value_template: "{{ short_text_passthrough }}"
+      - action: wilma.store_summary
+        data:
+          key: "{{ summary_key }}"
+          summary: "{{ source_text }}"
+          student: "{{ student }}"
+          title: "{{ title }}"
+          source_entity: "{{ source_entity }}"
+          source_attribute: "{{ source_attribute }}"
+          source_id: "{{ source_id }}"
+          source_text: "{{ source_text }}"
+          generated_by: passthrough
+    else:
+      - variables:
+          prompt_text: >-
+            {{ instructions }}
 
-  - action: input_text.set_value
-    target:
-      entity_id: !input summary_part_2
-    data:
-      value: "{{ summary_text_part_2 }}"
+            Källtext:
 
-  - action: input_text.set_value
-    target:
-      entity_id: !input summary_part_3
-    data:
-      value: "{{ summary_text_part_3 }}"
+            {{ source_text }}
+
+      - action: conversation.process
+        continue_on_error: true
+        data:
+          language: "{{ language }}"
+          agent_id: "{{ agent_id }}"
+          text: "{{ prompt_text }}"
+        response_variable: agent_response
+
+      - variables:
+          summary_text: >-
+            {% if agent_response is defined %}
+            {{
+              agent_response.get('response', {}).get('speech', {}).get('plain', {}).get('speech', '')
+              | trim
+            }}
+            {% else %}
+            {{ '' }}
+            {% endif %}
+
+      # A failed or empty reply is recorded instead of overwriting a good summary.
+      - if:
+          - condition: template
+            value_template: "{{ summary_text | trim == '' }}"
+        then:
+          - action: wilma.store_summary_error
+            data:
+              key: "{{ summary_key }}"
+              student: "{{ student }}"
+              error: >-
+                {% if agent_response is not defined %}
+                Agenten {{ agent_id }} svarade inte.
+                {% else %}
+                Agenten {{ agent_id }} gav ett tomt svar.
+                {% endif %}
+          - stop: "Conversation agent returned no usable summary"
+
+      - action: wilma.store_summary
+        data:
+          key: "{{ summary_key }}"
+          summary: "{{ summary_text }}"
+          student: "{{ student }}"
+          title: "{{ title }}"
+          prompt: "{{ prompt_text }}"
+          instructions: "{{ instructions }}"
+          source_entity: "{{ source_entity }}"
+          source_attribute: "{{ source_attribute }}"
+          source_id: "{{ source_id }}"
+          source_text: "{{ source_text }}"
+          agent_id: "{{ agent_id }}"
+          generated_by: agent
 
 mode: restart
 max_exceeded: silent
