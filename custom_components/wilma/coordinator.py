@@ -1004,7 +1004,12 @@ class WilmaCoordinator(DataUpdateCoordinator):
             view_url = f"{base}/{uid}/attendance/view?range=-3&first=01.01.{year}&last=31.12.{year}"
             async with session.get(self._url_with_lang(view_url), headers=h) as resp:
                 self.last_http_status = resp.status
-                view_html = await resp.text() if resp.status == 200 else ""
+                if resp.status != 200:
+                    self.last_fetch_errors.append(
+                        f"Attendance view for {student_id} returned HTTP {resp.status}"
+                    )
+                    return None, None
+                view_html = await resp.text()
 
             if view_html and self._is_login_page(view_html):
                 self.last_http_status = -1
@@ -1015,20 +1020,27 @@ class WilmaCoordinator(DataUpdateCoordinator):
             unexplained_url = f"{base}/{uid}/attendance"
             async with session.get(self._url_with_lang(unexplained_url), headers=h) as resp:
                 self.last_http_status = resp.status
-                unexplained_html = await resp.text() if resp.status == 200 else ""
+                if resp.status == 200:
+                    unexplained_html = await resp.text()
+                else:
+                    self.last_fetch_errors.append(
+                        f"Attendance unexplained for {student_id} returned HTTP {resp.status}"
+                    )
+                    unexplained_html = ""
 
             attendance_heading = self._extract_page_heading(unexplained_html)
             if attendance_heading:
                 self.ui_labels["attendance"] = attendance_heading
 
-            all_marks = self._parse_attendance_view_html(view_html) if view_html else []
+            all_marks = self._parse_attendance_view_html(view_html)
             unexplained = self._parse_attendance_unexplained_html(unexplained_html) if unexplained_html else []
             return all_marks, unexplained
         except UpdateFailed:
             raise
         except Exception as err:
             _LOGGER.debug("Error fetching attendance for %s: %s", student_id, err)
-            return [], []
+            self.last_fetch_errors.append(f"Attendance fetch for {student_id} failed: {err}")
+            return None, None
 
     async def _async_update_data(self):
         """Fetch data from Wilma."""
@@ -1036,10 +1048,13 @@ class WilmaCoordinator(DataUpdateCoordinator):
         data = await self.store.async_load() or {}
         stored_students = data.get("students", {})
         stored_news = data.get("news", {})
+        stored_attendance = data.get("attendance", {})
         if not isinstance(stored_students, dict):
             stored_students = {}
         if not isinstance(stored_news, dict):
             stored_news = {}
+        if not isinstance(stored_attendance, dict):
+            stored_attendance = {}
 
         try:
             if self.client is not None and not await self._is_session_valid():
@@ -1133,8 +1148,6 @@ class WilmaCoordinator(DataUpdateCoordinator):
                             },
                         )
 
-            await self.store.async_save({"students": updated_students, "news": updated_news})
-
             # Fetch schedules for the current week and upcoming weeks for each student.
             today = dt_util.now().date()
             current_week = today - timedelta(days=today.weekday())
@@ -1163,32 +1176,63 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 _LOGGER.info("Total unique events for %s: %d", student_id, len(schedules[student_id]))
 
             # Fetch attendance marks for each student
-            prev_attendance: dict[str, set[str]] = {
-                p["id"]: set(
-                    m["_id"]
-                    for m in (self.data or {}).get("attendance", {}).get(p["id"], [])
-                )
-                for p in self.student_profiles
-            }
             attendance: dict[str, list[dict[str, Any]]] = {}
             unexplained: dict[str, list[dict[str, Any]]] = {}
             for student in self.student_profiles:
                 student_id = student["id"]
-                all_marks, unexplained_marks = await self._fetch_attendance_for_student(student_id)
-                attendance[student_id] = all_marks
-                unexplained[student_id] = unexplained_marks
-                # Fire event for each new mark in the full history
-                for mark in all_marks:
-                    mark_id = mark.get("_id", "")
-                    if mark_id and mark_id not in prev_attendance.get(student_id, set()):
-                        self.hass.bus.async_fire(
-                            EVENT_NEW_ATTENDANCE,
-                            {
-                                "student_id": student_id,
-                                "student_name": student.get("name", ""),
-                                "mark": {k: v for k, v in mark.items() if not k.startswith("_")},
-                            },
-                        )
+                fetched_marks, fetched_unexplained = await self._fetch_attendance_for_student(student_id)
+
+                prev_student_marks = (
+                    (self.data or {}).get("attendance", {}).get(student_id)
+                    or stored_attendance.get(student_id, [])
+                )
+                prev_unexplained = (
+                    (self.data or {}).get("unexplained_attendance", {}).get(student_id)
+                    or []
+                )
+
+                if fetched_marks is None:
+                    # Fetch failed; preserve existing attendance data to avoid wiping baseline
+                    attendance[student_id] = prev_student_marks
+                    unexplained[student_id] = prev_unexplained
+                    continue
+
+                attendance[student_id] = fetched_marks
+                unexplained[student_id] = (
+                    fetched_unexplained if fetched_unexplained is not None else prev_unexplained
+                )
+
+                # Baseline check: only fire events if this student already had a baseline
+                has_baseline = (
+                    student_id in stored_attendance
+                    or (self.data is not None and student_id in self.data.get("attendance", {}))
+                )
+
+                if has_baseline:
+                    prev_ids = {
+                        m["_id"]
+                        for m in prev_student_marks
+                        if isinstance(m, dict) and "_id" in m
+                    }
+                    for mark in fetched_marks:
+                        mark_id = mark.get("_id", "")
+                        if mark_id and mark_id not in prev_ids:
+                            self.hass.bus.async_fire(
+                                EVENT_NEW_ATTENDANCE,
+                                {
+                                    "student_id": student_id,
+                                    "student_name": student.get("name", ""),
+                                    "mark": {k: v for k, v in mark.items() if not k.startswith("_")},
+                                },
+                            )
+
+            await self.store.async_save(
+                {
+                    "students": updated_students,
+                    "news": updated_news,
+                    "attendance": attendance,
+                }
+            )
 
             # Update last successful update time
             self.last_update_success_time = dt_util.utcnow()

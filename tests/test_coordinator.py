@@ -260,3 +260,78 @@ async def test_coordinator_deduplicates_messages(hass, mock_wilma_client):
 
     assert len(first["students"]["!STUDENT1"]) == 2
     assert len(second["students"]["!STUDENT1"]) == 2
+
+
+async def test_coordinator_attendance_baseline_and_events(hass, mock_wilma_client):
+    """Test attendance baseline is silent on first run, fires events on new marks, and survives reload."""
+    coordinator = WilmaCoordinator(
+        hass, "https://test.inschool.fi", "testuser", "testpass", "test_entry_id"
+    )
+
+    attendance_events: list[dict] = []
+
+    def _capture_attendance(event):
+        attendance_events.append(event.data)
+
+    hass.bus.async_listen("wilma_new_attendance_mark", _capture_attendance)
+
+    mock_marks_initial = [
+        {"_id": "02.09.2024|1|MA", "date": "02.09.2024", "lesson_hour": "1", "mark_type": "Poissaolo"},
+    ]
+
+    # First run (baseline)
+    with patch.object(coordinator, "_fetch_attendance_for_student", AsyncMock(return_value=(mock_marks_initial, []))):
+        data = await coordinator._async_update_data()
+        await hass.async_block_till_done()
+
+    # Initial baseline must be silent
+    assert len(attendance_events) == 0
+    assert len(data["attendance"]["!STUDENT1"]) == 1
+
+    # Second run with a new attendance mark
+    mock_marks_updated = [
+        {"_id": "03.09.2024|2|EN", "date": "03.09.2024", "lesson_hour": "2", "mark_type": "Myöhästyminen"},
+        {"_id": "02.09.2024|1|MA", "date": "02.09.2024", "lesson_hour": "1", "mark_type": "Poissaolo"},
+    ]
+
+    with patch.object(coordinator, "_fetch_attendance_for_student", AsyncMock(return_value=(mock_marks_updated, []))):
+        data2 = await coordinator._async_update_data()
+        await hass.async_block_till_done()
+
+    # Only the new mark should fire an event (one per student in the mock client)
+    assert len(attendance_events) == 2
+    assert {e["student_id"] for e in attendance_events} == {"!STUDENT1", "!STUDENT2"}
+    assert attendance_events[0]["mark"]["date"] == "03.09.2024"
+    assert attendance_events[0]["mark"]["lesson_hour"] == "2"
+    assert "_id" not in attendance_events[0]["mark"]
+
+    # Third run: simulate restart (new coordinator loading same storage)
+    new_coordinator = WilmaCoordinator(
+        hass, "https://test.inschool.fi", "testuser", "testpass", "test_entry_id"
+    )
+    assert new_coordinator.data is None
+
+    attendance_events.clear()
+    with patch.object(new_coordinator, "_fetch_attendance_for_student", AsyncMock(return_value=(mock_marks_updated, []))):
+        data3 = await new_coordinator._async_update_data()
+        await hass.async_block_till_done()
+
+    # Zero events on restart!
+    assert len(attendance_events) == 0
+    assert len(data3["attendance"]["!STUDENT1"]) == 2
+
+    # Fourth run: simulated fetch error (returns None, None)
+    with patch.object(new_coordinator, "_fetch_attendance_for_student", AsyncMock(return_value=(None, None))):
+        data4 = await new_coordinator._async_update_data()
+        await hass.async_block_till_done()
+
+    # Previous attendance preserved, baseline not wiped
+    assert len(attendance_events) == 0
+    assert len(data4["attendance"]["!STUDENT1"]) == 2
+
+    # Fifth run after error recovery with same marks: still 0 events
+    with patch.object(new_coordinator, "_fetch_attendance_for_student", AsyncMock(return_value=(mock_marks_updated, []))):
+        data5 = await new_coordinator._async_update_data()
+        await hass.async_block_till_done()
+
+    assert len(attendance_events) == 0
