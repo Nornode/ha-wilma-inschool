@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import zoneinfo
 from datetime import datetime, time, timedelta
 from typing import Any
 
@@ -64,8 +63,8 @@ class WilmaCalendarEntity(CoordinatorEntity, CalendarEntity):
             "sw_version": INTEGRATION_VERSION,
         }
 
-    def _tz(self) -> zoneinfo.ZoneInfo:
-        return zoneinfo.ZoneInfo(self.coordinator.hass.config.time_zone)
+    def _tz(self) -> datetime.tzinfo:
+        return dt_util.get_time_zone(self.coordinator.hass.config.time_zone) or dt_util.get_default_time_zone()
 
     def _raw_to_calendar_event(self, raw: dict[str, Any]) -> CalendarEvent | None:
         date_str = raw.get("date", "")

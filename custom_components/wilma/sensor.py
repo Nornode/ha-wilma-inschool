@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import zoneinfo
 from collections.abc import Callable
 from datetime import datetime, time as dt_time
 from typing import Any, Dict, Optional
@@ -493,7 +492,7 @@ class WilmaNextLessonSensor(WilmaBaseStudentSensor):
         start_iso = end_iso = None
         try:
             d = datetime.strptime(date_str, "%d.%m.%Y").date()
-            tz = zoneinfo.ZoneInfo(self.coordinator.hass.config.time_zone)
+            tz = dt_util.get_time_zone(self.coordinator.hass.config.time_zone) or dt_util.get_default_time_zone()
             start_iso = datetime.combine(d, dt_time(start_min // 60, start_min % 60), tzinfo=tz).isoformat()
             end_iso = datetime.combine(d, dt_time(end_min // 60, end_min % 60), tzinfo=tz).isoformat()
         except ValueError:
@@ -515,7 +514,7 @@ class WilmaNextLessonSensor(WilmaBaseStudentSensor):
             return None
         raw_events = self.coordinator.data.get("schedules", {}).get(self._student_id, [])
         now = dt_util.now()
-        tz = zoneinfo.ZoneInfo(self.coordinator.hass.config.time_zone)
+        tz = dt_util.get_time_zone(self.coordinator.hass.config.time_zone) or dt_util.get_default_time_zone()
         for evt in raw_events:
             date_str = evt.get("date", "")
             end_min = int(evt.get("end_minutes", 0))

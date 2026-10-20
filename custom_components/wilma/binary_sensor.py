@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import zoneinfo
 from datetime import datetime, time as dt_time, timedelta
 from typing import Any
 
@@ -167,7 +166,7 @@ class WilmaRecentMessageBinarySensor(WilmaBaseStudentBinarySensor):
             return False
         ts_str = msg.get("timestamp", "")
         try:
-            tz = zoneinfo.ZoneInfo(self.coordinator.hass.config.time_zone)
+            tz = dt_util.get_time_zone(self.coordinator.hass.config.time_zone) or dt_util.get_default_time_zone()
             ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M").replace(tzinfo=tz)
         except (ValueError, TypeError):
             return False
@@ -224,7 +223,7 @@ class WilmaRecentAttendanceBinarySensor(WilmaBaseStudentBinarySensor):
             return False
         date_str = marks[0].get("date", "")
         try:
-            tz = zoneinfo.ZoneInfo(self.coordinator.hass.config.time_zone)
+            tz = dt_util.get_time_zone(self.coordinator.hass.config.time_zone) or dt_util.get_default_time_zone()
             # Use end-of-day so a mark from "today" stays recent throughout the day
             d = datetime.strptime(date_str, "%d.%m.%Y").date()
             ts = datetime.combine(d, dt_time(23, 59), tzinfo=tz)
