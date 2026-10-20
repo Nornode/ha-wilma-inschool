@@ -1077,6 +1077,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
 
             updated_students: dict[str, list[dict[str, Any]]] = {}
             updated_news: dict[str, list[dict[str, Any]]] = {}
+            new_bulletins_by_student: dict[str, list[dict[str, Any]]] = {}
 
             pending_message_events: list[dict[str, Any]] = []
             pending_bulletin_events: list[dict[str, Any]] = []
@@ -1096,7 +1097,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
                     except ValueError:
                         after_timestamp = None
                 if after_timestamp is None:
-                    after_timestamp = dt_util.utcnow().replace(tzinfo=None) - timedelta(days=7)
+                    after_timestamp = dt_util.now().replace(tzinfo=None) - timedelta(days=7)
 
                 fetched_messages = await self._fetch_messages_for_student(student_id, after_timestamp)
                 merged_messages, new_messages = self._merge_messages(
@@ -1125,6 +1126,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
 
                 fetched_news = await self._fetch_news_for_student(student_id)
                 merged_news, new_news = self._merge_news(existing_news, fetched_news, dt_util.utcnow().isoformat())
+                new_bulletins_by_student[student_id] = new_news
 
                 if merged_news:
                     merged_news[0] = await self._fetch_news_body(student_id, merged_news[0])
@@ -1263,7 +1265,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 for student_id, messages in updated_students.items()
             }
             unread_bulletin_count_by_student = {
-                student_id: max(len(updated_news.get(student_id, [])) - len(stored_news.get(student_id, [])), 0)
+                student_id: len(new_bulletins_by_student.get(student_id, []))
                 for student_id in {p["id"] for p in self.student_profiles}
             }
 
