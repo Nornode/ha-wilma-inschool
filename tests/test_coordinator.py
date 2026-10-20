@@ -359,3 +359,62 @@ async def test_coordinator_merges_students_across_cycles(hass, mock_wilma_client
     assert "!STUDENT2" in stored_after["students"]
     assert "!STUDENT2" in stored_after["news"]
     assert "!STUDENT2" in stored_after["attendance"]
+
+
+async def test_coordinator_attendance_event_payload(hass, mock_wilma_client):
+    """Test that wilma_new_attendance_mark payload contains entry_id, student_id and student_name."""
+    coordinator = WilmaCoordinator(
+        hass, "https://test.inschool.fi", "testuser", "testpass", "test_entry_id"
+    )
+    # First cycle: silent baseline
+    await coordinator._async_update_data()
+
+    # Second cycle: new mark
+    attendance_events = []
+    hass.bus.async_listen("wilma_new_attendance_mark", lambda evt: attendance_events.append(evt.data))
+
+    new_mark = {
+        "_id": "att_new_123",
+        "date": "20.10.2026",
+        "day": "ti",
+        "lesson_hour": 1,
+        "subject_code": "MA",
+        "mark_type": "Myöhästyminen",
+        "teacher": "Opettaja",
+    }
+    side_effect = lambda sid: ([new_mark], []) if sid == "!STUDENT1" else ([], [])
+    with patch.object(coordinator, "_fetch_attendance_for_student", AsyncMock(side_effect=side_effect)):
+        await coordinator._async_update_data()
+        await hass.async_block_till_done()
+
+    assert len(attendance_events) == 1
+    event = attendance_events[0]
+    assert event["entry_id"] == "test_entry_id"
+    assert event["student_id"] == "!STUDENT1"
+    assert event["student_name"] == "Kid One"
+    assert event["mark"]["mark_type"] == "Myöhästyminen"
+    assert "_id" not in event["mark"]
+
+
+async def test_coordinator_auth_retry(hass, mock_wilma_client):
+    """Test that auth retry schedules _async_retry_refresh."""
+    coordinator = WilmaCoordinator(
+        hass, "https://test.inschool.fi", "testuser", "testpass", "test_entry_id"
+    )
+
+    with patch.object(coordinator, "async_request_refresh", AsyncMock()) as mock_refresh:
+        await coordinator._async_retry_refresh()
+        mock_refresh.assert_called_once()
+
+    # Test that transient auth error sets _retry_cancel with _async_retry_refresh
+    with patch.object(coordinator, "_is_session_valid", AsyncMock(return_value=False)), \
+         patch("custom_components.wilma.coordinator.WilmaClient") as mock_client_cls, \
+         patch("custom_components.wilma.coordinator.async_call_later") as mock_call_later:
+        client_inst = AsyncMock()
+        client_inst.login.side_effect = AuthenticationError("Invalid password")
+        mock_client_cls.return_value = client_inst
+
+        with pytest.raises(UpdateFailed):
+            await coordinator._async_update_data()
+
+        mock_call_later.assert_called_once_with(hass, 60, coordinator._async_retry_refresh)

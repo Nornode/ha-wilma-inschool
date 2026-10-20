@@ -1224,6 +1224,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
                         if mark_id and mark_id not in prev_ids:
                             pending_attendance_events.append(
                                 {
+                                    "entry_id": self.entry_id,
                                     "student_id": student_id,
                                     "student_name": student.get("name", ""),
                                     "mark": {k: v for k, v in mark.items() if not k.startswith("_")},
@@ -1306,7 +1307,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
             if self._retry_cancel:
                 self._retry_cancel()
             self._retry_cancel = async_call_later(
-                self.hass, 60, lambda _: self.hass.async_create_task(self.async_request_refresh())
+                self.hass, 60, self._async_retry_refresh
             )
             raise UpdateFailed("Authentication failed") from err
         except WilmaError as err:
@@ -1315,6 +1316,10 @@ class WilmaCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.exception("Unexpected error updating from Wilma: %s", err)
             raise UpdateFailed(f"Unexpected error: {err}") from err
+
+    async def _async_retry_refresh(self, _now: Any = None) -> None:
+        """Retry refresh after transient authentication failure."""
+        await self.async_request_refresh()
 
     async def async_close_client(self):
         """Close the Wilma client."""
