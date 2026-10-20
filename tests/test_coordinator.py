@@ -295,7 +295,7 @@ async def test_coordinator_attendance_baseline_and_events(hass, mock_wilma_clien
     ]
 
     with patch.object(coordinator, "_fetch_attendance_for_student", AsyncMock(return_value=(mock_marks_updated, []))):
-        data2 = await coordinator._async_update_data()
+        await coordinator._async_update_data()
         await hass.async_block_till_done()
 
     # Only the new mark should fire an event (one per student in the mock client)
@@ -331,7 +331,7 @@ async def test_coordinator_attendance_baseline_and_events(hass, mock_wilma_clien
 
     # Fifth run after error recovery with same marks: still 0 events
     with patch.object(new_coordinator, "_fetch_attendance_for_student", AsyncMock(return_value=(mock_marks_updated, []))):
-        data5 = await new_coordinator._async_update_data()
+        await new_coordinator._async_update_data()
         await hass.async_block_till_done()
 
     assert len(attendance_events) == 0

@@ -129,3 +129,55 @@ async def test_refresh_service(hass: HomeAssistant, mock_setup_integration):
         # Test refresh with explicit entry_id
         await hass.services.async_call(DOMAIN, "refresh", {"entry_id": entry.entry_id}, blocking=True)
         mock_refresh.assert_called_once()
+
+    with patch.object(coordinator, "async_request_refresh", AsyncMock()) as mock_refresh:
+        # Test refresh with target entity_id
+        entity_reg = get_entity_registry(hass)
+        entity_id = entity_reg.async_get_entity_id("sensor", DOMAIN, "test_!STUDENT1_latest_message")
+        await hass.services.async_call(DOMAIN, "refresh", {"entity_id": [entity_id]}, blocking=True)
+        mock_refresh.assert_called_once()
+
+
+async def test_calendar_events_with_timezone(hass: HomeAssistant, mock_setup_integration):
+    """Test calendar entity returns formatted events using dt_util timezone."""
+    from datetime import datetime
+    from homeassistant.util import dt as dt_util
+
+    entry = await mock_setup_integration()
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+
+    raw_event = {
+        "id": "event_1",
+        "date": "20.10.2099",
+        "start_minutes": 540,
+        "end_minutes": 600,
+        "subject": "Matematik",
+        "room": "Sal 101",
+        "teachers": ["Lärare 1"],
+    }
+    coordinator.data["schedules"] = {"!STUDENT1": [raw_event]}
+
+    entity_reg = get_entity_registry(hass)
+    calendar_entity_id = entity_reg.async_get_entity_id("calendar", DOMAIN, "test_!STUDENT1_calendar")
+    assert calendar_entity_id is not None
+
+    entity = hass.data["entity_components"]["calendar"].get_entity(calendar_entity_id)
+    assert entity is not None
+
+    from unittest.mock import AsyncMock, patch
+    with patch.object(
+        coordinator,
+        "async_fetch_schedule_for_student_range",
+        AsyncMock(return_value=[raw_event]),
+    ):
+        events = await entity.async_get_events(
+            hass,
+            datetime(2099, 10, 20, 0, 0, tzinfo=dt_util.UTC),
+            datetime(2099, 10, 20, 23, 59, tzinfo=dt_util.UTC),
+        )
+        assert len(events) == 1
+        assert events[0].summary == "Matematik"
+        assert events[0].location == "Sal 101"
+
+    assert entity.event is not None
+    assert entity.event.summary == "Matematik"

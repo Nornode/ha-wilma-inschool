@@ -21,11 +21,6 @@ from custom_components.wilma.const import (
 )
 
 
-@pytest.fixture(autouse=True)
-def auto_enable_custom_integrations(enable_custom_integrations):
-    """Enable custom integration loading in all tests."""
-    yield
-
 
 @pytest.fixture
 def mock_config_entry():
