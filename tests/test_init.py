@@ -54,8 +54,8 @@ async def test_setup_and_unload_entry(hass: HomeAssistant, mock_setup_integratio
     assert entry.entry_id not in hass.data[DOMAIN]
 
 
-async def test_setup_clears_generated_entity_names(hass: HomeAssistant, mock_setup_integration):
-    """Test that previously generated entity names do not block translated names."""
+async def test_setup_preserves_user_customized_entity_names(hass: HomeAssistant, mock_setup_integration):
+    """Test that user customized entity names are preserved on reload/restart."""
     entry = await mock_setup_integration()
     entity_registry = get_entity_registry(hass)
 
@@ -64,20 +64,51 @@ async def test_setup_clears_generated_entity_names(hass: HomeAssistant, mock_set
     )
     assert entity_id is not None
 
-    entity_registry.async_update_entity(entity_id, name="Unread Notiser")
-    assert entity_registry.async_get(entity_id).name == "Unread Notiser"
+    entity_registry.async_update_entity(entity_id, name="Next lesson Anna")
+    assert entity_registry.async_get(entity_id).name == "Next lesson Anna"
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
 
-    mock_config_entry = await mock_setup_integration()
+    await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
     entity_id = entity_registry.async_get_entity_id(
         "sensor", DOMAIN, "test_!STUDENT1_unread_count"
     )
     assert entity_id is not None
-    assert entity_registry.async_get(entity_id).name is None
+    assert entity_registry.async_get(entity_id).name == "Next lesson Anna"
 
-    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
-    await hass.async_block_till_done()
+
+async def test_migration_v1_to_v2(hass: HomeAssistant, mock_wilma_client):
+    """Test that migrating from version 1 to 2 clears stale prefixes and updates version."""
+    from custom_components.wilma import async_migrate_entry
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    entry_v1 = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            "server_url": "https://test.inschool.fi",
+            "username": "testuser",
+            "password": "testpass",
+        },
+        entry_id="test_mig",
+        version=1,
+    )
+    entry_v1.add_to_hass(hass)
+
+    entity_registry = get_entity_registry(hass)
+    entity_entry = entity_registry.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        "test_mig_!STUDENT1_unread_count",
+        suggested_object_id="test_mig_!STUDENT1_unread_count",
+        config_entry=entry_v1,
+    )
+    entity_registry.async_update_entity(entity_entry.entity_id, name="Unread Messages")
+    assert entity_registry.async_get(entity_entry.entity_id).name == "Unread Messages"
+
+    # Run migration
+    assert await async_migrate_entry(hass, entry_v1)
+    assert entry_v1.version == 2
+    assert entity_registry.async_get(entity_entry.entity_id).name is None

@@ -38,6 +38,7 @@ def mock_config_entry():
             CONF_PASSWORD: "testpass",
         },
         entry_id="test",
+        version=2,
     )
 
 

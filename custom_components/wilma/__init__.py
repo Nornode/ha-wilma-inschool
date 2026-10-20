@@ -9,7 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import ServiceValidationError
-from homeassistant.helpers import config_validation as cv, entity_registry
+from homeassistant.helpers import config_validation as cv, device_registry as dr, entity_registry
 
 from .const import (
     ATTR_AGENT_ID,
@@ -139,9 +139,10 @@ def _english_object_id_for_unique_id(
     return f"wilma_{parts[1]}_{entity_key}"
 
 
-def _migrate_entity_names(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def _async_migrate_entity_names(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Rename old registry entries to English IDs and clear generated names."""
     registry = entity_registry.async_get(hass)
+    device_reg = dr.async_get(hass)
     stale_prefixes = (
         "Unread ",
         "Latest ",
@@ -156,12 +157,24 @@ def _migrate_entity_names(hass: HomeAssistant, entry: ConfigEntry) -> None:
         "Seuraava ",
         "Antal ",
     )
+    student_name_by_id: dict[str, str] = {}
     coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-    student_name_by_id = {
-        profile["id"]: profile["name"]
-        for profile in getattr(coordinator, "student_profiles", [])
-        if isinstance(profile, dict) and profile.get("id")
-    }
+    if coordinator and getattr(coordinator, "student_profiles", None):
+        student_name_by_id = {
+            profile["id"]: profile["name"]
+            for profile in coordinator.student_profiles
+            if isinstance(profile, dict) and profile.get("id")
+        }
+    else:
+        for device in device_reg.devices.values():
+            for identifier in device.identifiers:
+                if len(identifier) == 2 and identifier[0] == DOMAIN:
+                    ident_val = identifier[1]
+                    prefix = f"{entry.entry_id}_"
+                    if ident_val.startswith(prefix):
+                        sid = ident_val[len(prefix):]
+                        if device.name and device.name.startswith("Wilma "):
+                            student_name_by_id[sid] = device.name[len("Wilma "):]
 
     for entity in list(registry.entities.values()):
         if entity.config_entry_id != entry.entry_id:
@@ -196,6 +209,18 @@ def _migrate_entity_names(hass: HomeAssistant, entry: ConfigEntry) -> None:
                 _LOGGER.exception("Failed to clear stale entity name for %s", entity.entity_id)
 
 
+async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
+    """Migrate old entry."""
+    _LOGGER.debug("Migrating config entry from version %s", config_entry.version)
+
+    if config_entry.version == 1:
+        await _async_migrate_entity_names(hass, config_entry)
+        hass.config_entries.async_update_entry(config_entry, version=2)
+
+    _LOGGER.info("Migration to version %s successful", config_entry.version)
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Wilma from a config entry."""
     hass.data.setdefault(DOMAIN, {})
@@ -219,8 +244,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Store coordinator
     hass.data[DOMAIN][entry.entry_id] = coordinator
-
-    _migrate_entity_names(hass, entry)
 
     _async_register_services(hass)
 
