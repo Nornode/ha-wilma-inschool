@@ -335,3 +335,27 @@ async def test_coordinator_attendance_baseline_and_events(hass, mock_wilma_clien
         await hass.async_block_till_done()
 
     assert len(attendance_events) == 0
+
+
+async def test_coordinator_merges_students_across_cycles(hass, mock_wilma_client):
+    """Test that students missing from one cycle are preserved in storage."""
+    coordinator = WilmaCoordinator(
+        hass, "https://test.inschool.fi", "testuser", "testpass", "test_entry_id"
+    )
+
+    # Initial update discovers !STUDENT1 and !STUDENT2
+    await coordinator._async_update_data()
+    stored = await coordinator.store.async_load()
+    assert "!STUDENT1" in stored["students"]
+    assert "!STUDENT2" in stored["students"]
+
+    # Next cycle discovery only discovers !STUDENT1 (e.g. temporary glitch)
+    with patch.object(coordinator, "_discover_students", AsyncMock(return_value=[{"id": "!STUDENT1", "name": "Kid One"}])):
+        await coordinator._async_update_data()
+
+    # !STUDENT2 must NOT be deleted from storage
+    stored_after = await coordinator.store.async_load()
+    assert "!STUDENT1" in stored_after["students"]
+    assert "!STUDENT2" in stored_after["students"]
+    assert "!STUDENT2" in stored_after["news"]
+    assert "!STUDENT2" in stored_after["attendance"]

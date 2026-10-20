@@ -1078,6 +1078,9 @@ class WilmaCoordinator(DataUpdateCoordinator):
             updated_students: dict[str, list[dict[str, Any]]] = {}
             updated_news: dict[str, list[dict[str, Any]]] = {}
 
+            pending_message_events: list[dict[str, Any]] = []
+            pending_bulletin_events: list[dict[str, Any]] = []
+
             for student in self.student_profiles:
                 student_id = student["id"]
                 existing_messages = stored_students.get(student_id, [])
@@ -1104,8 +1107,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
 
                 if new_messages and existing_messages:
                     for message in new_messages:
-                        self.hass.bus.async_fire(
-                            EVENT_NEW_MESSAGE,
+                        pending_message_events.append(
                             {
                                 "entry_id": self.entry_id,
                                 "student_id": student_id,
@@ -1118,7 +1120,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
                                 "content": message.get("content_markdown") or message.get("content_html"),
                                 "content_html": message.get("content_html"),
                                 "content_markdown": message.get("content_markdown"),
-                            },
+                            }
                         )
 
                 fetched_news = await self._fetch_news_for_student(student_id)
@@ -1132,8 +1134,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 if new_news and existing_news:
                     for item in new_news:
                         item = await self._fetch_news_body(student_id, item)
-                        self.hass.bus.async_fire(
-                            EVENT_NEW_BULLETIN,
+                        pending_bulletin_events.append(
                             {
                                 "entry_id": self.entry_id,
                                 "student_id": student_id,
@@ -1145,7 +1146,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
                                 "url": item.get("url"),
                                 "content_html": item.get("content_html"),
                                 "content_markdown": item.get("content_markdown"),
-                            },
+                            }
                         )
 
             # Fetch schedules for the current week and upcoming weeks for each student.
@@ -1178,6 +1179,8 @@ class WilmaCoordinator(DataUpdateCoordinator):
             # Fetch attendance marks for each student
             attendance: dict[str, list[dict[str, Any]]] = {}
             unexplained: dict[str, list[dict[str, Any]]] = {}
+            pending_attendance_events: list[dict[str, Any]] = []
+
             for student in self.student_profiles:
                 student_id = student["id"]
                 fetched_marks, fetched_unexplained = await self._fetch_attendance_for_student(student_id)
@@ -1217,22 +1220,32 @@ class WilmaCoordinator(DataUpdateCoordinator):
                     for mark in fetched_marks:
                         mark_id = mark.get("_id", "")
                         if mark_id and mark_id not in prev_ids:
-                            self.hass.bus.async_fire(
-                                EVENT_NEW_ATTENDANCE,
+                            pending_attendance_events.append(
                                 {
                                     "student_id": student_id,
                                     "student_name": student.get("name", ""),
                                     "mark": {k: v for k, v in mark.items() if not k.startswith("_")},
-                                },
+                                }
                             )
 
+            # Persist merged storage across cycles BEFORE firing events
             await self.store.async_save(
                 {
-                    "students": updated_students,
-                    "news": updated_news,
-                    "attendance": attendance,
+                    "students": {**stored_students, **updated_students},
+                    "news": {**stored_news, **updated_news},
+                    "attendance": {**stored_attendance, **attendance},
                 }
             )
+
+            # Fire events only after persistent store has been committed
+            for msg_event in pending_message_events:
+                self.hass.bus.async_fire(EVENT_NEW_MESSAGE, msg_event)
+
+            for bulletin_event in pending_bulletin_events:
+                self.hass.bus.async_fire(EVENT_NEW_BULLETIN, bulletin_event)
+
+            for attendance_event in pending_attendance_events:
+                self.hass.bus.async_fire(EVENT_NEW_ATTENDANCE, attendance_event)
 
             # Update last successful update time
             self.last_update_success_time = dt_util.utcnow()
