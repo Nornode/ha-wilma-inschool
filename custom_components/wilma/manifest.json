@@ -3,6 +3,10 @@
   "name": "Wilma",
   "codeowners": ["@Nornode"],
   "config_flow": true,
+  "categories": [
+    "productivity_information.calendars_todos",
+    "messaging_notifications"
+  ],
   "dependencies": [],
   "documentation": "https://github.com/Nornode/ha-wilma-inschool",
   "integration_type": "hub",
