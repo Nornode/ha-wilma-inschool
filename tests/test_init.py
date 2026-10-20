@@ -112,3 +112,20 @@ async def test_migration_v1_to_v2(hass: HomeAssistant, mock_wilma_client):
     assert await async_migrate_entry(hass, entry_v1)
     assert entry_v1.version == 2
     assert entity_registry.async_get(entity_entry.entity_id).name is None
+
+
+async def test_refresh_service(hass: HomeAssistant, mock_setup_integration):
+    """Test calling wilma.refresh service triggers coordinator refresh."""
+    from unittest.mock import AsyncMock, patch
+    entry = await mock_setup_integration()
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+
+    with patch.object(coordinator, "async_request_refresh", AsyncMock()) as mock_refresh:
+        # Test refresh without target
+        await hass.services.async_call(DOMAIN, "refresh", {}, blocking=True)
+        mock_refresh.assert_called_once()
+
+    with patch.object(coordinator, "async_request_refresh", AsyncMock()) as mock_refresh:
+        # Test refresh with explicit entry_id
+        await hass.services.async_call(DOMAIN, "refresh", {"entry_id": entry.entry_id}, blocking=True)
+        mock_refresh.assert_called_once()

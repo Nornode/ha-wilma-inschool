@@ -34,6 +34,7 @@ from .const import (
     GENERATED_BY_AGENT,
     GENERATED_BY_PASSTHROUGH,
     SERVICE_CLEAR_SUMMARY,
+    SERVICE_REFRESH,
     SERVICE_STORE_SUMMARY,
     SERVICE_STORE_SUMMARY_ERROR,
     SERVICE_SUMMARY_STATUS,
@@ -269,6 +270,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id)
 
         if not hass.data[DOMAIN]:
+            hass.services.async_remove(DOMAIN, SERVICE_REFRESH)
             hass.services.async_remove(DOMAIN, SERVICE_STORE_SUMMARY)
             hass.services.async_remove(DOMAIN, SERVICE_CLEAR_SUMMARY)
             hass.services.async_remove(DOMAIN, SERVICE_SUMMARY_STATUS)
@@ -423,6 +425,24 @@ def _async_register_services(hass: HomeAssistant) -> None:
             "student_id": student_id,
         }
 
+    async def _async_refresh(call: ServiceCall) -> None:
+        """Force a refresh of Wilma data."""
+        entry_id = call.data.get(ATTR_ENTRY_ID)
+        if not entry_id and call.data.get("entity_id"):
+            registry = entity_registry.async_get(hass)
+            for eid in call.data["entity_id"]:
+                ent = registry.async_get(eid)
+                if ent and ent.config_entry_id:
+                    entry_id = ent.config_entry_id
+                    break
+        coordinators: dict[str, WilmaCoordinator] = hass.data.get(DOMAIN, {})
+        if entry_id and entry_id in coordinators:
+            await coordinators[entry_id].async_request_refresh()
+        else:
+            for coordinator in coordinators.values():
+                await coordinator.async_request_refresh()
+
+    hass.services.async_register(DOMAIN, SERVICE_REFRESH, _async_refresh)
     hass.services.async_register(
         DOMAIN, SERVICE_STORE_SUMMARY, _async_store_summary, schema=STORE_SUMMARY_SCHEMA
     )
