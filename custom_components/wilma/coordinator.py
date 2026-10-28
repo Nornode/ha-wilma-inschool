@@ -939,6 +939,17 @@ class WilmaCoordinator(DataUpdateCoordinator):
                         (legend[c] for c in css_classes if c in legend), mark_type_name
                     )
 
+                    # A teacher's note puts free text where the mark type name
+                    # normally is; keep it instead of losing it to the legend label.
+                    note = ""
+                    if legend_name and mark_type_name != legend_name:
+                        text = mark_type_name.replace("\r\n", "\n").strip()
+                        if not any(
+                            text == label or text.endswith(f"({label})")
+                            for label in legend.values()
+                        ):
+                            note = text
+
                     # Determine lesson hour from column index
                     hour = col_to_hour[col_idx] if col_idx < len(col_to_hour) else ""
 
@@ -951,6 +962,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
                         "mark_type": legend_name or mark_type_name,
                         "teacher": teacher.strip(),
                         "teacher_initials": cell.get_text(strip=True),
+                        "note": note,
                         "_id": mark_id,
                     })
 
