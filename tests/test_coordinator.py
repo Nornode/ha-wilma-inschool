@@ -418,3 +418,36 @@ async def test_coordinator_auth_retry(hass, mock_wilma_client):
             await coordinator._async_update_data()
 
         mock_call_later.assert_called_once_with(hass, 60, coordinator._async_retry_refresh)
+
+
+ATTENDANCE_VIEW_HTML = """
+<table>
+  <tr><th colspan="2">Date</th><th>8</th><th>9</th><th>10</th></tr>
+  <tr>
+    <td>Wed</td><td>28.10.2026</td>
+    <td class="event at-tp32" title="Teacher's comment (Please visit the homepage of Wilma); For information:&#13;&#10;Please bring a plastic bag tomorrow. /Teacher One">TO</td>
+    <td class="event at-tp1" title="MA; Late /Teacher Two">TT</td>
+    <td class="event at-tp32" title="ET01; Teacher's comment (Please visit the homepage of Wilma) /Teacher One">TO</td>
+  </tr>
+</table>
+<table>
+  <tr><td class="at-tp32"></td><td>Please visit the homepage of Wilma</td></tr>
+  <tr><td class="at-tp1"></td><td>Late</td></tr>
+</table>
+"""
+
+
+def test_parse_attendance_view_keeps_teacher_note_text():
+    """Teacher's note text from the cell title is kept, not replaced by the legend label."""
+    marks = WilmaCoordinator._parse_attendance_view_html(ATTENDANCE_VIEW_HTML)
+    by_hour = {mark["lesson_hour"]: mark for mark in marks}
+
+    note_mark = by_hour["8"]
+    assert note_mark["mark_type"] == "Please visit the homepage of Wilma"
+    assert note_mark["note"] == "For information:\nPlease bring a plastic bag tomorrow."
+    assert note_mark["teacher"] == "Teacher One"
+
+    # A plain mark only repeats its type name, and a "Type (label)" title is not a note
+    assert by_hour["9"]["mark_type"] == "Late"
+    assert by_hour["9"]["note"] == ""
+    assert by_hour["10"]["note"] == ""
