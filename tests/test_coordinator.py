@@ -489,3 +489,146 @@ def test_parse_attendance_view_keeps_teacher_note_text():
     assert by_hour["9"]["note"] == ""
     assert by_hour["10"]["note"] == ""
 
+
+EXAMS_CALENDAR_HTML = """
+<html><body><main id="main-content">
+  <div class="table-responsive margin-bottom">
+    <table class="table table-grey">
+      <tr>
+        <td class="col-lg-3 col-md-3"><strong>Ma 9.11.2026</strong></td>
+        <td>
+            Chapters 1-3 :
+            MA1
+          : Mathematics 1
+        </td>
+      </tr>
+      <tr>
+        <th class="col-lg-3 col-md-3">Opettaja</th>
+        <td><a href="/!STUDENT1/profiles/teachers/1" class="ope profile-link">TEA (Teacher One)</a>,
+            <a href="/!STUDENT1/profiles/teachers/2" class="ope profile-link">TEB (Teacher Two)</a></td>
+      </tr>
+    </table>
+  </div>
+  <div class="table-responsive margin-bottom">
+    <table class="table table-grey">
+      <tr>
+        <td class="col-lg-3 col-md-3"><strong>Ti 3.11.2026</strong></td>
+        <td>
+            KOE: unit 4 :
+            EN2
+          : EN2
+        </td>
+      </tr>
+      <tr>
+        <th class="col-lg-3 col-md-3">Kokeen lisätiedot</th>
+        <td>Bring a dictionary.</td>
+      </tr>
+    </table>
+  </div>
+</main></body></html>
+"""
+
+
+def test_parse_exams_html():
+    """Test parsing of the /exams/calendar page."""
+    exams = WilmaCoordinator._parse_exams_html(EXAMS_CALENDAR_HTML, "!STUDENT1", "Student One")
+
+    assert [exam["date"] for exam in exams] == ["2026-11-03", "2026-11-09"]
+
+    english, maths = exams
+    assert english["course_code"] == "EN2"
+    assert english["topic"] == "KOE: unit 4"
+    assert english["info"] == "Bring a dictionary."
+    assert english["teachers"] == []
+
+    assert maths["id"] == "2026-11-09_MA1"
+    assert maths["subject"] == "Mathematics 1"
+    assert maths["course_code"] == "MA1"
+    assert maths["topic"] == "Chapters 1-3"
+    assert maths["teachers"] == ["TEA (Teacher One)", "TEB (Teacher Two)"]
+    assert maths["student_id"] == "!STUDENT1"
+
+
+def test_parse_exams_html_without_exams():
+    """Test that a page without exam tables yields no exams."""
+    assert WilmaCoordinator._parse_exams_html("<main></main>", "!STUDENT1", "Student One") == []
+
+
+class _StatusResponse:
+    def __init__(self, status: int, html: str = "") -> None:
+        self.status = status
+        self._html = html
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def text(self):
+        return self._html
+
+
+def _client_returning(status: int, html: str = "") -> MagicMock:
+    session = MagicMock()
+    session.get = MagicMock(return_value=_StatusResponse(status, html))
+    client = MagicMock()
+    client._sid = "sid"
+    client._ensure_session = AsyncMock(return_value=session)
+    client.login = AsyncMock()
+    client.close = AsyncMock()
+    return client
+
+
+SCHEDULE_HTML = (
+    '<script>var eventsJSON = {"Events": [{"Id": 1, "Date": "09.11.2026", '
+    '"Start": 480, "End": 525, "Text": {"0": "MA1"}}]};</script>'
+)
+
+
+async def test_schedule_fetch_relogins_when_session_invalidated(hass):
+    """A 403 (session replaced by another login) triggers one re-login and retry."""
+    coordinator = WilmaCoordinator(
+        hass, "https://test.inschool.fi", "testuser", "testpass", "test_entry_id"
+    )
+    stale = _client_returning(403)
+    fresh = _client_returning(200, SCHEDULE_HTML)
+    coordinator.client = stale
+
+    with patch("custom_components.wilma.coordinator.WilmaClient", return_value=fresh):
+        events = await coordinator._fetch_schedule_for_student("!STUDENT1", date(2026, 11, 9))
+
+    assert [event["subject"] for event in events] == ["MA1"]
+    stale.close.assert_awaited_once()
+    fresh.login.assert_awaited_once_with("testuser", "testpass")
+    assert coordinator.client is fresh
+
+
+async def test_schedule_fetch_logs_in_when_client_missing(hass):
+    """Calendar range queries work even if the client was dropped between refreshes."""
+    coordinator = WilmaCoordinator(
+        hass, "https://test.inschool.fi", "testuser", "testpass", "test_entry_id"
+    )
+    fresh = _client_returning(200, SCHEDULE_HTML)
+
+    with patch("custom_components.wilma.coordinator.WilmaClient", return_value=fresh):
+        events = await coordinator._fetch_schedule_for_student("!STUDENT1")
+
+    assert len(events) == 1
+    assert coordinator.client is fresh
+
+
+async def test_schedule_fetch_gives_up_after_one_retry(hass):
+    """If the renewed session is rejected too, return no events instead of looping."""
+    coordinator = WilmaCoordinator(
+        hass, "https://test.inschool.fi", "testuser", "testpass", "test_entry_id"
+    )
+    coordinator.client = _client_returning(403)
+    fresh = _client_returning(403)
+
+    with patch("custom_components.wilma.coordinator.WilmaClient", return_value=fresh):
+        events = await coordinator._fetch_schedule_for_student("!STUDENT1")
+
+    assert events == []
+    fresh.login.assert_awaited_once()
+

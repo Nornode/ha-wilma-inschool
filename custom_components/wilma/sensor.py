@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from datetime import datetime, time as dt_time
+from datetime import date, datetime, time as dt_time
 from typing import Any, Dict, Optional
 
 from homeassistant.components.sensor import (
@@ -59,6 +59,7 @@ from .const import (
     SENSOR_LATEST_ATTENDANCE,
     SENSOR_LAST_HTTP_STATUS,
     SENSOR_LATEST_MESSAGE,
+    SENSOR_NEXT_EXAM,
     SENSOR_NEXT_LESSON,
     SENSOR_UNREAD_BULLETIN_COUNT,
     SENSOR_UNREAD_COUNT,
@@ -206,6 +207,20 @@ async def async_setup_entry(
                     key=SENSOR_LATEST_ATTENDANCE,
                     name="Latest Attendance Mark",
                     icon="mdi:clipboard-clock",
+                ),
+                entry,
+                student_id,
+                student_name,
+            )
+        )
+
+        entities.append(
+            WilmaNextExamSensor(
+                coordinator,
+                SensorEntityDescription(
+                    key=SENSOR_NEXT_EXAM,
+                    name="Next Exam",
+                    icon="mdi:file-document-edit",
                 ),
                 entry,
                 student_id,
@@ -609,6 +624,62 @@ class WilmaLatestAttendanceSensor(WilmaBaseStudentSensor):
         if not self.coordinator.data:
             return []
         return self.coordinator.data.get("attendance", {}).get(self._student_id, [])
+
+
+class WilmaNextExamSensor(WilmaBaseStudentSensor):
+    """Next upcoming exam for one student; all upcoming exams as attributes."""
+
+    @property
+    def native_value(self) -> str | None:
+        exam = self._next_exam()
+        if not exam:
+            return None
+        topic = exam.get("topic")
+        subject = exam.get("subject") or ""
+        return f"{subject}: {topic}" if topic else subject or None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        attrs = super().extra_state_attributes or {}
+        upcoming = self._upcoming()
+        today = dt_util.now().date()
+        if upcoming:
+            exam = upcoming[0]
+            exam_date = date.fromisoformat(exam["date"])
+            attrs.update({
+                "date": exam["date"],
+                "days_until": (exam_date - today).days,
+                "subject": exam.get("subject"),
+                "course_code": exam.get("course_code"),
+                "course_name": exam.get("course_name"),
+                "topic": exam.get("topic"),
+                "info": exam.get("info"),
+                "teachers": exam.get("teachers"),
+            })
+        attrs["exam_count"] = len(upcoming)
+        attrs["exams"] = [
+            {
+                "date": e["date"],
+                "days_until": (date.fromisoformat(e["date"]) - today).days,
+                "subject": e.get("subject"),
+                "topic": e.get("topic"),
+                "info": e.get("info"),
+                "teachers": e.get("teachers"),
+            }
+            for e in upcoming
+        ]
+        return attrs
+
+    def _upcoming(self) -> list[dict[str, Any]]:
+        if not self.coordinator.data:
+            return []
+        today = dt_util.now().date().isoformat()
+        exams = self.coordinator.data.get("exams", {}).get(self._student_id, [])
+        return [e for e in exams if e.get("date", "") >= today]
+
+    def _next_exam(self) -> dict[str, Any] | None:
+        upcoming = self._upcoming()
+        return upcoming[0] if upcoming else None
 
 
 class WilmaLastHttpStatusSensor(CoordinatorEntity, SensorEntity):

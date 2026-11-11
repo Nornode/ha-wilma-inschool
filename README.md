@@ -15,6 +15,7 @@ A Home Assistant integration for the [Wilma](https://www.wilma.fi/) school platf
 - **Messages & bulletins** — polls for new messages and school news, fires an event on each new one
 - **Schedule & Calendar** — native HA calendar entity per student, plus a _Next Lesson_ sensor
 - **Attendance** — full school-year history, tracks unexplained marks and fires an event on new ones
+- **Exams** — upcoming exams from the exam calendar as a _Next Exam_ sensor and a dedicated calendar, plus an event when a new exam is announced
 - **AI summaries** — a blueprint that turns long Wilma text into a real, dashboard-ready entity
 - **Ready-made dashboards** — drop-in Lovelace YAML that discovers students automatically
 - **Multilingual** — UI translated to English, Finnish and Swedish
@@ -47,12 +48,14 @@ All entities live under the **Wilma {First name}** device (e.g. _Wilma StudentA_
 | `next_lesson`           | Sensor        | Subject of the next upcoming lesson; start/end time, room and teacher in attributes                            |
 | `attendance_count`      | Sensor        | Total attendance marks this school year; `unexplained_count` and `by_type` breakdown in attributes             |
 | `latest_attendance`     | Sensor        | Most recent mark type; date, lesson hour, subject code and teacher in attributes                               |
+| `next_exam`             | Sensor        | Next upcoming exam (`subject: topic`); `date`, `days_until`, `info`, `teachers` and all upcoming `exams` in attributes |
 | `summary_{key}`         | Sensor        | Stored AI summary; full text in the `summary` attribute. Created on demand — see [AI summaries](#ai-summaries) |
 | `last_update`           | Sensor        | Timestamp of the last successful refresh (diagnostic)                                                          |
 | `recent_message`        | Binary sensor | On when the latest message is within the recent threshold                                                      |
 | `recent_bulletin`       | Binary sensor | On when the latest bulletin is within the recent threshold                                                     |
 | `recent_attendance`     | Binary sensor | On when the latest attendance mark is within the recent threshold                                              |
 | `schedule`              | Calendar      | Full timetable — shows in the HA Calendar UI and supports date-range queries                                   |
+| `exams`                 | Calendar      | Upcoming exams as all-day events (topic, additional info and teachers in the description)                      |
 
 Two account-level entities live under a shared **Wilma** device:
 
@@ -70,6 +73,7 @@ All events include `entry_id`, `student_id` and `student_name`.
 | `wilma_new_message`         | `message_id`, `subject`, `sender`, `timestamp`, `unread`, `content`, `content_html`, `content_markdown` | New message appears          |
 | `wilma_new_bulletin`        | `news_id`, `title`, `date`, `section`, `url`, `content_html`, `content_markdown`                        | New school bulletin appears  |
 | `wilma_new_attendance_mark` | `mark` (dict with `date`, `day`, `lesson_hour`, `subject_code`, `mark_type`, `teacher`)                 | New attendance mark detected |
+| `wilma_new_exam`            | `id`, `date`, `subject`, `course_code`, `course_name`, `topic`, `info`, `teachers`, `details`           | New exam appears in the exam calendar |
 
 ## Services
 

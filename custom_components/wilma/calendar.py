@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
@@ -29,9 +29,11 @@ async def async_setup_entry(
     if not profiles:
         profiles = [{"id": "default", "name": entry.data.get("username", "Wilma")}]
 
-    async_add_entities(
-        WilmaCalendarEntity(coordinator, entry, p["id"], p["name"]) for p in profiles
-    )
+    entities: list[CalendarEntity] = []
+    for p in profiles:
+        entities.append(WilmaCalendarEntity(coordinator, entry, p["id"], p["name"]))
+        entities.append(WilmaExamCalendarEntity(coordinator, entry, p["id"], p["name"]))
+    async_add_entities(entities)
 
 
 class WilmaCalendarEntity(CoordinatorEntity, CalendarEntity):
@@ -127,4 +129,84 @@ class WilmaCalendarEntity(CoordinatorEntity, CalendarEntity):
             e for raw in raw_events
             if (e := self._raw_to_calendar_event(raw))
             if e.start < end_date and e.end > start_date
+        ]
+
+
+class WilmaExamCalendarEntity(CoordinatorEntity, CalendarEntity):
+    """Calendar entity with one student's upcoming exams as all-day events."""
+
+    def __init__(
+        self,
+        coordinator: WilmaCoordinator,
+        entry: ConfigEntry,
+        student_id: str,
+        student_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._student_id = student_id
+        first_name = student_name.split()[0] if student_name else student_name
+        self._attr_unique_id = f"{entry.entry_id}_{student_id}_exams_calendar"
+        self._attr_has_entity_name = True
+        self._attr_name = coordinator.entity_name("exams")
+        self.internal_integration_suggested_object_id = coordinator.entity_object_id(
+            "exams",
+            student_name,
+        )
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, f"{entry.entry_id}_{student_id}")},
+            "name": f"Wilma {first_name}",
+            "manufacturer": "Visma",
+            "model": "Wilma",
+            "sw_version": INTEGRATION_VERSION,
+        }
+
+    def _all_events(self) -> list[CalendarEvent]:
+        if not self.coordinator.data:
+            return []
+        events: list[CalendarEvent] = []
+        for raw in self.coordinator.data.get("exams", {}).get(self._student_id, []):
+            try:
+                d = date.fromisoformat(raw.get("date", ""))
+            except ValueError:
+                continue
+            subject = raw.get("subject") or "Koe"
+            topic = raw.get("topic")
+            description_parts = []
+            if topic:
+                description_parts.append(topic)
+            if raw.get("info"):
+                description_parts.append(raw["info"])
+            if raw.get("teachers"):
+                description_parts.append(", ".join(raw["teachers"]))
+            events.append(
+                CalendarEvent(
+                    start=d,
+                    end=d + timedelta(days=1),
+                    summary=f"{subject}: {topic}" if topic else subject,
+                    description="\n".join(description_parts) or None,
+                    uid=f"wilma_exam_{self._student_id}_{raw.get('id', '')}",
+                )
+            )
+        events.sort(key=lambda e: e.start)
+        return events
+
+    @property
+    def event(self) -> CalendarEvent | None:
+        """Return the next upcoming exam."""
+        today = dt_util.now().date()
+        upcoming = [e for e in self._all_events() if e.end > today]
+        return upcoming[0] if upcoming else None
+
+    async def async_get_events(
+        self,
+        hass: HomeAssistant,
+        start_date: datetime,
+        end_date: datetime,
+    ) -> list[CalendarEvent]:
+        """Return exams within the requested range."""
+        tz = dt_util.get_time_zone(hass.config.time_zone) or dt_util.get_default_time_zone()
+        return [
+            e for e in self._all_events()
+            if datetime.combine(e.start, time.min, tzinfo=tz) < end_date
+            and datetime.combine(e.end, time.min, tzinfo=tz) > start_date
         ]

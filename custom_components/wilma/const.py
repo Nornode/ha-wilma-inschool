@@ -73,6 +73,7 @@ BINARY_SENSOR_RECENT_ATTENDANCE = "recent_attendance"
 SENSOR_ATTENDANCE_COUNT = "attendance_count"
 SENSOR_LATEST_ATTENDANCE = "latest_attendance"
 SENSOR_LAST_HTTP_STATUS = "last_http_status"
+SENSOR_NEXT_EXAM = "next_exam"
 
 STORAGE_KEY = f"{DOMAIN}_messages"
 STORAGE_VERSION = 1
@@ -96,5 +97,6 @@ SIGNAL_SUMMARY_UPDATED = "wilma_summary_updated_{}"
 EVENT_NEW_MESSAGE = "wilma_new_message"
 EVENT_NEW_ATTENDANCE = "wilma_new_attendance_mark"
 EVENT_NEW_BULLETIN = "wilma_new_bulletin"
+EVENT_NEW_EXAM = "wilma_new_exam"
 
 SCHEDULE_WEEKS_AHEAD = 2  # current week plus next week

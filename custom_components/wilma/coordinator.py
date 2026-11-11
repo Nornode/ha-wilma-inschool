@@ -1,5 +1,6 @@
 """DataUpdateCoordinator for the Wilma integration."""
 
+import asyncio
 import json
 import logging
 import re
@@ -30,6 +31,7 @@ from .const import (
     DEFAULT_ONLY_UNREAD,
     DOMAIN,
     EVENT_NEW_BULLETIN,
+    EVENT_NEW_EXAM,
     EVENT_NEW_ATTENDANCE,
     EVENT_NEW_MESSAGE,
     SCHEDULE_WEEKS_AHEAD,
@@ -79,6 +81,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
         self.password = password
         self.entry_id = entry_id
         self.client = None
+        self._login_lock = asyncio.Lock()
         self._retry_cancel = None
         self.store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}_{entry_id}")
         self.last_update_success_time = None
@@ -176,6 +179,8 @@ class WilmaCoordinator(DataUpdateCoordinator):
             message_unread = f"{unread_prefix} {message_plural}"
             attendance_latest = f"{latest_prefix} tuntimerkintä"
             attendance_count = "tuntimerkinnät"
+            next_exam = "Seuraava koe"
+            exams_name = "Kokeet"
         elif self.language == 2:
             latest_prefix = "Senaste"
             unread_prefix = "Olästa"
@@ -190,6 +195,8 @@ class WilmaCoordinator(DataUpdateCoordinator):
             message_unread = f"{unread_prefix} {message_plural}"
             attendance_latest = f"{latest_prefix} lektionsanteckning"
             attendance_count = "lektionsanteckningar"
+            next_exam = "Nästa prov"
+            exams_name = "Prov"
         else:
             latest_prefix = "Latest"
             unread_prefix = "Unread"
@@ -204,6 +211,8 @@ class WilmaCoordinator(DataUpdateCoordinator):
             message_unread = f"{unread_prefix} {message_plural}"
             attendance_latest = f"{latest_prefix} attendance mark"
             attendance_count = "attendance marks"
+            next_exam = "Next exam"
+            exams_name = "Exams"
 
         mapping = {
             "problem": problem,
@@ -220,6 +229,8 @@ class WilmaCoordinator(DataUpdateCoordinator):
             "latest_attendance": attendance_latest,
             "last_http_status": http_status,
             "schedule": schedule_name,
+            "next_exam": next_exam,
+            "exams": exams_name,
         }
 
         return mapping.get(entity_key, entity_key)
@@ -850,38 +861,97 @@ class WilmaCoordinator(DataUpdateCoordinator):
 
         return events
 
+    async def _async_relogin(self, stale_client: Any) -> bool:
+        """Replace a missing/invalidated Wilma session with a fresh login.
+
+        Wilma allows only one active session per account: logging in elsewhere
+        (browser, another script) makes the old Wilma2SID return HTTP 403.
+        ``stale_client`` is the client that failed; if another task already
+        replaced it, the new session is reused instead of logging in again
+        (a second login would invalidate the first one).
+        """
+        async with self._login_lock:
+            if self.client is not None and self.client is not stale_client:
+                return True
+            old, self.client = self.client, None
+            if old is not None:
+                try:
+                    await old.close()
+                except Exception as err:  # pragma: no cover
+                    _LOGGER.debug("Error closing stale Wilma client: %s", err)
+            client = WilmaClient(self.server_url)
+            try:
+                await client.login(self.username, self.password)
+            except Exception as err:
+                _LOGGER.warning("Wilma re-login failed: %s", err)
+                self.last_fetch_errors.append(f"Re-login failed: {err}")
+                try:
+                    await client.close()
+                except Exception:  # pragma: no cover
+                    pass
+                return False
+            _LOGGER.info("Re-authenticated to Wilma (previous session was missing or invalidated)")
+            self.client = client
+            return True
+
     async def _fetch_schedule_for_student(
         self, student_id: str, for_date: date | None = None
     ) -> list[dict[str, Any]]:
-        """Fetch one week of schedule for a student."""
-        if not self.client:
-            _LOGGER.warning("_fetch_schedule_for_student: no client available")
-            return []
+        """Fetch one week of schedule for a student.
+
+        On a missing or invalidated session (HTTP 401/403 or login page) the
+        session is renewed once and the request retried.
+        """
         student_name = next(
             (p["name"] for p in self.student_profiles if p["id"] == student_id),
             self.username,
         )
-        try:
-            session = await self.client._ensure_session()
-            headers = {"Wilma2SID": self.client._sid or ""}
-            path = f"{student_id.lstrip('/')}/schedule"
-            if for_date:
-                path += f"?date={for_date.strftime('%d.%m.%Y')}"
-            url = f"{self.server_url.rstrip('/')}/{path}"
-            _LOGGER.debug("Fetching schedule from: %s", url)
-            async with session.get(self._url_with_lang(url), headers=headers) as resp:
-                self.last_http_status = resp.status
-                if resp.status != 200:
-                    msg = f"Schedule for {student_id} returned HTTP {resp.status}"
-                    _LOGGER.warning(msg)
-                    self.last_fetch_errors.append(msg)
-                    return []
-                html = await resp.text()
+        path = f"{student_id.lstrip('/')}/schedule"
+        if for_date:
+            path += f"?date={for_date.strftime('%d.%m.%Y')}"
+        url = self._url_with_lang(f"{self.server_url.rstrip('/')}/{path}")
 
-            if self._is_login_page(html):
-                self.last_http_status = -1
-                self.client = None
-                raise UpdateFailed(f"Wilma session expired (login page on schedule fetch for {student_id})")
+        for attempt in range(2):
+            client = self.client
+            if client is None:
+                if attempt or not await self._async_relogin(None):
+                    _LOGGER.warning("Schedule fetch for %s: no Wilma session available", student_id)
+                    return []
+                continue
+            try:
+                session = await client._ensure_session()
+                headers = {"Wilma2SID": client._sid or ""}
+                _LOGGER.debug("Fetching schedule from: %s", url)
+                async with session.get(url, headers=headers) as resp:
+                    self.last_http_status = resp.status
+                    status = resp.status
+                    html = await resp.text() if status == 200 else ""
+            except Exception as err:
+                msg = f"Error fetching schedule for {student_id}: {err}"
+                _LOGGER.error(msg, exc_info=True)
+                self.last_fetch_errors.append(msg)
+                return []
+
+            session_lost = status in (401, 403) or (status == 200 and self._is_login_page(html))
+            if session_lost:
+                if attempt == 0:
+                    _LOGGER.info(
+                        "Schedule for %s returned %s (session invalidated); re-authenticating",
+                        student_id,
+                        "login page" if status == 200 else f"HTTP {status}",
+                    )
+                    if await self._async_relogin(client):
+                        continue
+                msg = f"Schedule for {student_id}: Wilma session could not be renewed (HTTP {status})"
+                _LOGGER.warning(msg)
+                self.last_fetch_errors.append(msg)
+                return []
+
+            if status != 200:
+                msg = f"Schedule for {student_id} returned HTTP {status}"
+                _LOGGER.warning(msg)
+                self.last_fetch_errors.append(msg)
+                return []
 
             schedule_heading = self._extract_page_heading(html)
             if schedule_heading:
@@ -890,13 +960,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
             events = self._parse_schedule_html(html, student_id, student_name)
             _LOGGER.debug("Parsed %d schedule events for %s", len(events), student_id)
             return events
-        except UpdateFailed:
-            raise
-        except Exception as err:
-            msg = f"Error fetching schedule for {student_id}: {err}"
-            _LOGGER.error(msg, exc_info=True)
-            self.last_fetch_errors.append(msg)
-            return []
+        return []
 
     @staticmethod
     def _schedule_sort_key(evt: dict[str, Any]) -> tuple:
@@ -933,6 +997,130 @@ class WilmaCoordinator(DataUpdateCoordinator):
             week_date += timedelta(weeks=1)
 
         return sorted(seen_ids.values(), key=self._schedule_sort_key)
+
+    @staticmethod
+    def _parse_exams_html(
+        html: str, student_id: str, student_name: str
+    ) -> list[dict[str, Any]]:
+        """Parse upcoming exams from /exams/calendar.
+
+        Each exam is rendered as its own ``table.table-grey``: the first row holds
+        the date (``<strong>Ma 9.11.2026</strong>``) and ``"<topic> : <code> : <name>"``,
+        followed by ``<th>label</th><td>value</td>`` detail rows (teacher, info...).
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        container = soup.find("main") or soup
+        exams: list[dict[str, Any]] = []
+        for table in container.select("table"):
+            rows = table.find_all("tr")
+            if not rows:
+                continue
+            first = rows[0]
+            strong = first.find("strong")
+            if not strong:
+                continue
+            date_match = re.search(r"(\d{1,2})\.(\d{1,2})\.(\d{4})", strong.get_text(" ", strip=True))
+            if not date_match:
+                continue
+            day, month, year = (int(x) for x in date_match.groups())
+            try:
+                exam_date = date(year, month, day)
+            except ValueError:
+                continue
+
+            cells = first.find_all("td")
+            title_text = cells[-1].get_text(" ", strip=True) if len(cells) > 1 else ""
+            title_text = re.sub(r"\s+", " ", title_text).strip()
+            parts = [p.strip() for p in title_text.split(" : ")]
+            parts = [p.rstrip(" :").strip() for p in parts if p.strip(" :")]
+            topic = course_code = course_name = ""
+            if len(parts) >= 3:
+                topic = " : ".join(parts[:-2])
+                course_code, course_name = parts[-2], parts[-1]
+            elif len(parts) == 2:
+                course_code, course_name = parts
+            elif parts:
+                course_name = parts[0]
+
+            teachers: list[str] = []
+            info = ""
+            details: dict[str, str] = {}
+            for row in rows[1:]:
+                th, td = row.find("th"), row.find("td")
+                if not th or not td:
+                    continue
+                label = th.get_text(" ", strip=True)
+                links = td.select("a.ope, a[href*='/profiles/teachers/']")
+                if links:
+                    teachers = [a.get_text(" ", strip=True) for a in links]
+                    details[label] = ", ".join(teachers)
+                    continue
+                value = re.sub(r"\s+", " ", td.get_text(" ", strip=True)).strip()
+                if not value:
+                    continue
+                details[label] = value
+                if "lisätied" in label.lower() or "additional" in label.lower() or "tilläggs" in label.lower():
+                    info = value
+
+            subject = course_name or course_code
+            exam_id = f"{exam_date.isoformat()}_{course_code or course_name or topic}"
+            exams.append({
+                "id": exam_id,
+                "date": exam_date.isoformat(),
+                "subject": subject,
+                "course_code": course_code,
+                "course_name": course_name,
+                "topic": topic,
+                "info": info,
+                "teachers": teachers,
+                "details": details,
+                "student_id": student_id,
+                "student_name": student_name,
+            })
+
+        exams.sort(key=lambda e: (e["date"], e["subject"]))
+        return exams
+
+    async def _fetch_exams_for_student(self, student_id: str) -> list[dict[str, Any]] | None:
+        """Fetch upcoming exams for a student. Returns None on failure."""
+        if not self.client:
+            return None
+        student_name = next(
+            (p["name"] for p in self.student_profiles if p["id"] == student_id),
+            self.username,
+        )
+        try:
+            session = await self.client._ensure_session()
+            headers = {"Wilma2SID": self.client._sid or ""}
+            url = f"{self.server_url.rstrip('/')}/{student_id.lstrip('/')}/exams/calendar"
+            async with session.get(self._url_with_lang(url), headers=headers) as resp:
+                self.last_http_status = resp.status
+                if resp.status != 200:
+                    msg = f"Exams for {student_id} returned HTTP {resp.status}"
+                    _LOGGER.warning(msg)
+                    self.last_fetch_errors.append(msg)
+                    return None
+                html = await resp.text()
+
+            if self._is_login_page(html):
+                self.last_http_status = -1
+                self.client = None
+                raise UpdateFailed(f"Wilma session expired (login page on exams fetch for {student_id})")
+
+            exams_heading = self._extract_page_heading(html)
+            if exams_heading:
+                self.ui_labels["exams"] = exams_heading
+
+            exams = self._parse_exams_html(html, student_id, student_name)
+            _LOGGER.debug("Parsed %d exams for %s", len(exams), student_id)
+            return exams
+        except UpdateFailed:
+            raise
+        except Exception as err:
+            msg = f"Error fetching exams for {student_id}: {err}"
+            _LOGGER.error(msg, exc_info=True)
+            self.last_fetch_errors.append(msg)
+            return None
 
     @staticmethod
     def _parse_attendance_view_html(html: str) -> list[dict[str, Any]]:
@@ -1135,6 +1323,9 @@ class WilmaCoordinator(DataUpdateCoordinator):
         stored_students = data.get("students", {})
         stored_news = data.get("news", {})
         stored_attendance = data.get("attendance", {})
+        stored_exams = data.get("exams", {})
+        if not isinstance(stored_exams, dict):
+            stored_exams = {}
         if not isinstance(stored_students, dict):
             stored_students = {}
         if not isinstance(stored_news, dict):
@@ -1323,12 +1514,44 @@ class WilmaCoordinator(DataUpdateCoordinator):
                                 }
                             )
 
+            # Fetch upcoming exams for each student
+            exams: dict[str, list[dict[str, Any]]] = {}
+            pending_exam_events: list[dict[str, Any]] = []
+            for student in self.student_profiles:
+                student_id = student["id"]
+                prev_exams = (
+                    (self.data or {}).get("exams", {}).get(student_id)
+                    or stored_exams.get(student_id, [])
+                )
+                fetched_exams = await self._fetch_exams_for_student(student_id)
+                if fetched_exams is None:
+                    exams[student_id] = prev_exams
+                    continue
+                exams[student_id] = fetched_exams
+
+                has_baseline = student_id in stored_exams or (
+                    self.data is not None and student_id in self.data.get("exams", {})
+                )
+                if has_baseline:
+                    prev_ids = {e.get("id") for e in prev_exams if isinstance(e, dict)}
+                    for exam in fetched_exams:
+                        if exam["id"] not in prev_ids:
+                            pending_exam_events.append(
+                                {
+                                    "entry_id": self.entry_id,
+                                    "student_id": student_id,
+                                    "student_name": student.get("name", ""),
+                                    **{k: v for k, v in exam.items() if k not in ("student_id", "student_name")},
+                                }
+                            )
+
             # Persist merged storage across cycles BEFORE firing events
             await self.store.async_save(
                 {
                     "students": {**stored_students, **updated_students},
                     "news": {**stored_news, **updated_news},
                     "attendance": {**stored_attendance, **attendance},
+                    "exams": {**stored_exams, **exams},
                 }
             )
 
@@ -1341,6 +1564,9 @@ class WilmaCoordinator(DataUpdateCoordinator):
 
             for attendance_event in pending_attendance_events:
                 self.hass.bus.async_fire(EVENT_NEW_ATTENDANCE, attendance_event)
+
+            for exam_event in pending_exam_events:
+                self.hass.bus.async_fire(EVENT_NEW_EXAM, exam_event)
 
             # Update last successful update time
             self.last_update_success_time = dt_util.utcnow()
@@ -1387,6 +1613,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 "schedules": schedules,
                 "attendance": attendance,
                 "unexplained_attendance": unexplained,
+                "exams": exams,
             }
 
         except AuthenticationError as err:
