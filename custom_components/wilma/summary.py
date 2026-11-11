@@ -176,6 +176,13 @@ class WilmaSummaryStore:
                 previous["title"] = title
             if web_url is not None:
                 previous["web_url"] = web_url
+            await self._async_save()
+            async_dispatcher_send(
+                self.hass,
+                SIGNAL_SUMMARY_UPDATED.format(self.entry_id),
+                student_id,
+                key,
+            )
             return previous
 
         record: dict[str, Any] = {

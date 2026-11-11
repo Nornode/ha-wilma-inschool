@@ -328,6 +328,8 @@ def _resolve_student(
             return profile["id"], name
         if name and WilmaCoordinator._slugify_object_id(name) == wanted:
             return profile["id"], name
+        if name and name.split()[0].lower() == student.lower():
+            return profile["id"], name
 
     known = ", ".join(
         f"{profile['id']} ({profile.get('name')})" for profile in profiles
@@ -359,6 +361,8 @@ def _async_register_services(hass: HomeAssistant) -> None:
             ent_state = hass.states.get(source_entity)
             if ent_state:
                 web_url = ent_state.attributes.get("web_url")
+        if web_url and hasattr(coordinator, "_url_with_lang"):
+            web_url = coordinator._url_with_lang(web_url)
 
         await coordinator.summaries.async_store(
             student_id,
@@ -413,20 +417,24 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
         source_state = hass.states.get(source_entity)
         web_url = source_state.attributes.get("web_url") if source_state else None
+        if web_url and hasattr(coordinator, "_url_with_lang"):
+            web_url = coordinator._url_with_lang(web_url)
         source_id = str(source_state.attributes.get("id") or source_state.attributes.get("news_id") or "") if source_state else ""
         stored_source_id = str(record.get("source_id") or "") if record else ""
 
+        has_summary = bool(record and record.get("summary"))
+
         if not source_text:
             reason = "no_source"
-        elif (stored_hash and stored_hash == source_hash) or (
+        elif (stored_hash and stored_hash == source_hash and has_summary) or (
             record and record.get("summary") == source_text
         ) or (
-            source_id and stored_source_id and source_id == stored_source_id
+            source_id and stored_source_id and source_id == stored_source_id and has_summary
         ):
             reason = "unchanged"
         elif len(source_text) < min_length:
             reason = "too_short"
-        elif record is None:
+        elif not has_summary:
             reason = "no_summary"
         else:
             reason = "source_changed"
