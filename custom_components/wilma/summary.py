@@ -154,6 +154,7 @@ class WilmaSummaryStore:
         source_text: str | None = None,
         agent_id: str | None = None,
         generated_by: str = GENERATED_BY_AGENT,
+        web_url: str | None = None,
     ) -> dict[str, Any]:
         """Persist one summary and notify listeners."""
         entries = self._data.setdefault(student_id, {})
@@ -173,6 +174,8 @@ class WilmaSummaryStore:
             previous["plain_summary"] = plain
             if title is not None:
                 previous["title"] = title
+            if web_url is not None:
+                previous["web_url"] = web_url
             return previous
 
         record: dict[str, Any] = {
@@ -191,6 +194,7 @@ class WilmaSummaryStore:
             "source_length": new_source_length,
             "agent_id": agent_id,
             "generated_by": generated_by,
+            "web_url": web_url if web_url is not None else (previous.get("web_url") if previous else None),
             "generated_at": dt_util.utcnow().isoformat(),
             "last_error": None,
             "last_error_at": None,

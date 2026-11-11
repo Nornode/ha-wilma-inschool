@@ -1,0 +1,172 @@
+blueprint:
+  name: Wilma Actionable Notifications & Anti-Storm Deduplication
+  description: >-
+    Dispatches rich push notifications to mobile devices when a Wilma summary sensor updates.
+    Includes anti-storm protection against Home Assistant restart bursts, deduplicates school
+    bulletins across siblings, and attaches interactive action buttons to view in Home Assistant
+    or open directly in Wilma web.
+  domain: automation
+  input:
+    summary_entities:
+      name: Wilma Summary Sensors
+      description: Summary sensor entities to watch for new messages, bulletins, or attendance.
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              integration: wilma
+          multiple: true
+
+    notify_service:
+      name: Notification Service
+      description: The mobile app notification service (e.g. notify.mobile_app_robbans_phone).
+      selector:
+        text: {}
+
+    dashboard_path:
+      name: Home Assistant Dashboard Path
+      description: Deep link path opened by the "Visa i Home Assistant" button.
+      default: /lovelace-parents/wilma
+      selector:
+        text: {}
+
+    uptime_guard_seconds:
+      name: Startup Grace Period
+      description: >-
+        Suppress push notifications during the first N seconds after Home Assistant starts
+        to prevent restart notification storms.
+      default: 180
+      selector:
+        number:
+          min: 0
+          max: 600
+          step: 30
+          unit_of_measurement: seconds
+
+    deduplicate_bulletins:
+      name: Deduplicate Bulletins Across Siblings
+      description: >-
+        When enabled, school bulletins with the same news id use a unified notification tag so
+        siblings in the same school update an existing notification instead of producing duplicates.
+      default: true
+      selector:
+        boolean: {}
+
+mode: queued
+max: 10
+
+variables:
+  dashboard_path: !input dashboard_path
+  notify_service: !input notify_service
+  uptime_guard_seconds: !input uptime_guard_seconds
+  deduplicate_bulletins: !input deduplicate_bulletins
+
+triggers:
+  - trigger: state
+    entity_id: !input summary_entities
+    attribute: generated_at
+
+conditions:
+  # 1. State validity check
+  - condition: template
+    value_template: >-
+      {{
+        trigger.to_state is not none
+        and trigger.to_state.state not in ['unavailable', 'unknown']
+        and trigger.from_state is not none
+        and trigger.from_state.state not in ['unavailable', 'unknown']
+      }}
+
+  # 2. Text content must actually have changed (not merely a timestamp bump or reload)
+  - condition: template
+    value_template: >-
+      {{
+        trigger.to_state.attributes.get('plain_summary') != trigger.from_state.attributes.get('plain_summary')
+        and (trigger.to_state.attributes.get('plain_summary') or '') | trim != ''
+      }}
+
+  # 3. Not stale and recently generated (within last 15 minutes)
+  - condition: template
+    value_template: >-
+      {{
+        not is_state_attr(trigger.entity_id, 'is_stale', true)
+        and (as_timestamp(now()) - as_timestamp(trigger.to_state.attributes.get('generated_at', 0))) < 900
+      }}
+
+  # 4. Anti-storm: ignore notifications during HA startup grace period
+  - condition: template
+    value_template: >-
+      {% set uptime_sensor = states('sensor.uptime') %}
+      {% if uptime_sensor not in ['unavailable', 'unknown', 'None'] %}
+        {{ (as_timestamp(now()) - as_timestamp(uptime_sensor)) >= (uptime_guard_seconds | int) }}
+      {% else %}
+        true
+      {% endif %}
+
+actions:
+  - variables:
+      student_raw: "{{ state_attr(trigger.entity_id, 'student_name') | default('Student', true) }}"
+      student: "{{ student_raw.split()[0] }}"
+      subject: "{{ state_attr(trigger.entity_id, 'title') | default(states(trigger.entity_id), true) }}"
+      is_ai: "{{ state_attr(trigger.entity_id, 'generated_by') == 'agent' }}"
+      raw_msg: >-
+        {{
+          state_attr(trigger.entity_id, 'plain_summary')
+          | default(state_attr(trigger.entity_id, 'summary'), true)
+          | default(states(trigger.entity_id), true)
+        }}
+      is_bulletin: "{{ 'bulletin' in trigger.entity_id }}"
+      is_attendance: "{{ 'attendance' in trigger.entity_id }}"
+      source_id: "{{ state_attr(trigger.entity_id, 'source_id') or '' }}"
+      web_url: "{{ state_attr(trigger.entity_id, 'web_url') or '' }}"
+      channel: "Wilma {{ student }} Notes"
+      icon: >-
+        {% if is_bulletin %}
+          mdi:bullhorn
+        {% elif is_attendance %}
+          mdi:clipboard-alert
+        {% else %}
+          mdi:email
+        {% endif %}
+      tag: >-
+        {% if is_bulletin and deduplicate_bulletins and source_id != '' %}
+          wilma_bulletin_{{ source_id }}
+        {% else %}
+          {{ trigger.entity_id }}
+        {% endif %}
+      notification_title: >-
+        {% if is_bulletin and deduplicate_bulletins %}
+          Wilma Anslagstavla - {{ subject }}
+        {% else %}
+          Åt {{ student }} - {{ subject }}
+        {% endif %}
+      notification_actions: >-
+        {% set acts = [
+          {
+            "action": "URI",
+            "title": "Visa i Home Assistant",
+            "uri": dashboard_path
+          }
+        ] %}
+        {% if web_url != '' %}
+          {% set acts = acts + [
+            {
+              "action": "URI",
+              "title": "Öppna i Wilma",
+              "uri": web_url
+            }
+          ] %}
+        {% endif %}
+        {{ acts }}
+
+  - action: "{{ notify_service }}"
+    data:
+      title: "{{ notification_title }}"
+      message: "{% if is_ai %}🤖 AI-Sammanfattning:\n{% endif %}{{ raw_msg }}"
+      data:
+        channel: "{{ channel }}"
+        group: "{{ channel }}"
+        notification_icon: "{{ icon }}"
+        subject: "{{ subject }}"
+        tag: "{{ tag }}"
+        actions: "{{ notification_actions }}"

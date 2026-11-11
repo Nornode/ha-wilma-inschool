@@ -26,6 +26,7 @@ from .const import (
     ATTR_SUMMARY,
     ATTR_SUMMARY_KEY,
     ATTR_TITLE,
+    ATTR_WEB_URL,
     CONF_PASSWORD,
     CONF_SERVER_URL,
     CONF_USERNAME,
@@ -64,6 +65,7 @@ STORE_SUMMARY_SCHEMA = vol.Schema(
         vol.Optional(ATTR_SOURCE_ID): cv.string,
         vol.Optional("source_text"): cv.string,
         vol.Optional(ATTR_AGENT_ID): cv.string,
+        vol.Optional(ATTR_WEB_URL): cv.string,
         vol.Optional(ATTR_GENERATED_BY): vol.In(
             [GENERATED_BY_AGENT, GENERATED_BY_PASSTHROUGH]
         ),
@@ -352,6 +354,12 @@ def _async_register_services(hass: HomeAssistant) -> None:
         if source_text is None and source_entity:
             source_text = compose_source_text(hass, source_entity, source_attribute)
 
+        web_url = call.data.get(ATTR_WEB_URL)
+        if not web_url and source_entity:
+            ent_state = hass.states.get(source_entity)
+            if ent_state:
+                web_url = ent_state.attributes.get("web_url")
+
         await coordinator.summaries.async_store(
             student_id,
             student_name,
@@ -366,6 +374,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
             source_text=source_text,
             agent_id=call.data.get(ATTR_AGENT_ID),
             generated_by=call.data.get(ATTR_GENERATED_BY, GENERATED_BY_AGENT),
+            web_url=web_url,
         )
 
     async def _async_clear_summary(call: ServiceCall) -> None:
@@ -402,10 +411,17 @@ def _async_register_services(hass: HomeAssistant) -> None:
         record = coordinator.summaries.get(student_id, key)
         stored_hash = record.get("source_hash") if record else None
 
+        source_state = hass.states.get(source_entity)
+        web_url = source_state.attributes.get("web_url") if source_state else None
+        source_id = str(source_state.attributes.get("id") or source_state.attributes.get("news_id") or "") if source_state else ""
+        stored_source_id = str(record.get("source_id") or "") if record else ""
+
         if not source_text:
             reason = "no_source"
         elif (stored_hash and stored_hash == source_hash) or (
             record and record.get("summary") == source_text
+        ) or (
+            source_id and stored_source_id and source_id == stored_source_id
         ):
             reason = "unchanged"
         elif len(source_text) < min_length:
@@ -425,6 +441,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
             "stored_hash": stored_hash,
             "min_length": min_length,
             "student_id": student_id,
+            "web_url": web_url,
         }
 
     async def _async_refresh(call: ServiceCall) -> None:

@@ -445,3 +445,59 @@ async def test_status_reports_unchanged_for_existing_passthrough(
     assert resp["reason"] == "unchanged"
     assert resp["needs_update"] is False
     assert resp["call_agent"] is False
+
+
+async def test_summary_stores_and_exposes_web_url(
+    hass: HomeAssistant, mock_setup_integration
+):
+    """Store service persists web_url and summary_status returns it."""
+    await mock_setup_integration()
+    hass.states.async_set(
+        "sensor.mock_msg",
+        "Hello",
+        {"id": "123", "web_url": "https://test.inschool.fi/!STUDENT1/messages/123"},
+    )
+
+    resp = await hass.services.async_call(
+        DOMAIN,
+        "summary_status",
+        {
+            "key": "latest_message",
+            "source_entity": "sensor.mock_msg",
+            "student": "Kid One",
+            "min_length": 1,
+        },
+        blocking=True,
+        return_response=True,
+    )
+    assert resp["web_url"] == "https://test.inschool.fi/!STUDENT1/messages/123"
+
+    await _store(
+        hass,
+        key="latest_message",
+        summary="Summary of message",
+        student="Kid One",
+        source_entity="sensor.mock_msg",
+        source_id="123",
+        web_url="https://test.inschool.fi/!STUDENT1/messages/123",
+    )
+
+    state = hass.states.get("sensor.wilma_kid_summary_latest_message")
+    assert state.attributes.get("web_url") == "https://test.inschool.fi/!STUDENT1/messages/123"
+
+    # Status check with same source_id recognizes unchanged
+    resp_again = await hass.services.async_call(
+        DOMAIN,
+        "summary_status",
+        {
+            "key": "latest_message",
+            "source_entity": "sensor.mock_msg",
+            "student": "Kid One",
+            "min_length": 1,
+        },
+        blocking=True,
+        return_response=True,
+    )
+    assert resp_again["reason"] == "unchanged"
+    assert resp_again["needs_update"] is False
+

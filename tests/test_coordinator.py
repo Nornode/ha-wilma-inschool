@@ -547,6 +547,12 @@ def test_parse_exams_html():
     assert maths["topic"] == "Chapters 1-3"
     assert maths["teachers"] == ["TEA (Teacher One)", "TEB (Teacher Two)"]
     assert maths["student_id"] == "!STUDENT1"
+    assert maths["web_url"] == "/!STUDENT1/exams/calendar"
+
+    exams_with_server = WilmaCoordinator._parse_exams_html(
+        EXAMS_CALENDAR_HTML, "!STUDENT1", "Student One", server_url="https://test.inschool.fi"
+    )
+    assert exams_with_server[1]["web_url"] == "https://test.inschool.fi/!STUDENT1/exams/calendar"
 
 
 def test_parse_exams_html_without_exams():

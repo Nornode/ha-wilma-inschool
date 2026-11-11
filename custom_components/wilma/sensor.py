@@ -26,6 +26,8 @@ from .const import (
     ATTR_AGENT_ID,
     ATTR_CONTENT,
     ATTR_CONTENT_MARKDOWN,
+    ATTR_RECENT_MARKS_MARKDOWN,
+    ATTR_WEB_URL,
     ATTR_ERROR_COUNT,
     ATTR_GENERATED_AT,
     ATTR_GENERATED_BY,
@@ -381,6 +383,17 @@ class WilmaLatestMessageSensor(WilmaBaseStudentSensor):
             except Exception:
                 pass
 
+        web_url = self._message.get("web_url")
+        if not web_url and self._message.get("id"):
+            path = (
+                f"{self._student_id.lstrip('/')}/messages/{self._message['id']}"
+                if self._student_id
+                else f"messages/{self._message['id']}"
+            )
+            web_url = f"{self.coordinator.server_url.rstrip('/')}/{path}"
+        if web_url:
+            attrs[ATTR_WEB_URL] = web_url
+
         return attrs
 
 
@@ -428,6 +441,8 @@ class WilmaLatestBulletinSensor(WilmaBaseStudentSensor):
 
         if item.get("content_markdown"):
             attrs[ATTR_CONTENT_MARKDOWN] = item.get("content_markdown")
+        if item.get("web_url"):
+            attrs[ATTR_WEB_URL] = item.get("web_url")
         return attrs
 
 
@@ -544,6 +559,33 @@ class WilmaNextLessonSensor(WilmaBaseStudentSensor):
         return None
 
 
+def _format_mark_line(m: dict[str, Any]) -> str:
+    """Format one attendance mark into a readable bullet line."""
+    line = f"- {m.get('date', '')} {m.get('day', '')}".strip()
+    if m.get("lesson_hour"):
+        line += f" lektion {m.get('lesson_hour')}"
+    if m.get("subject_code"):
+        line += f": {m.get('subject_code')}"
+    if m.get("mark_type"):
+        line += f" – {m.get('mark_type')}"
+    if m.get("note"):
+        line += f" ({m.get('note')})"
+    elif m.get("teacher"):
+        line += f" ({m.get('teacher')})"
+    return line
+
+
+def _is_recent_mark(m: dict[str, Any], max_days: int = 2) -> bool:
+    """Return True if mark date is within max_days from today."""
+    date_str = m.get("date", "")
+    try:
+        mark_date = datetime.strptime(date_str, "%d.%m.%Y").date()
+        today = dt_util.now().date()
+        return 0 <= (today - mark_date).days <= max_days
+    except (ValueError, TypeError):
+        return False
+
+
 class WilmaAttendanceCountSensor(WilmaBaseStudentSensor):
     """Number of attendance marks in the current school year."""
 
@@ -557,6 +599,9 @@ class WilmaAttendanceCountSensor(WilmaBaseStudentSensor):
         marks = self._marks()
         unexplained = self._unexplained()
         attrs["unexplained_count"] = len(unexplained)
+        attrs[ATTR_WEB_URL] = (
+            f"{self.coordinator.server_url.rstrip('/')}/{self._student_id.lstrip('/')}/attendance/view"
+        )
         # Count by mark type
         by_type: dict[str, int] = {}
         for m in marks:
@@ -565,25 +610,31 @@ class WilmaAttendanceCountSensor(WilmaBaseStudentSensor):
         if by_type:
             attrs["by_type"] = by_type
         if marks:
-            lines = []
-            for m in marks[:10]:
-                line = f"- {m.get('date', '')} {m.get('day', '')}".strip()
-                if m.get("lesson_hour"):
-                    line += f" lektion {m.get('lesson_hour')}"
-                if m.get("subject_code"):
-                    line += f": {m.get('subject_code')}"
-                if m.get("mark_type"):
-                    line += f" – {m.get('mark_type')}"
-                if m.get("teacher"):
-                    line += f" ({m.get('teacher')})"
-                lines.append(line)
+            lines = [_format_mark_line(m) for m in marks[:10]]
             attrs[ATTR_CONTENT_MARKDOWN] = "\n".join(lines)
+
+            # Recent marks: marks within last 2 days or unexplained marks
+            recent_marks = [
+                m for m in marks
+                if _is_recent_mark(m, 2) or m in unexplained
+            ]
+            if recent_marks:
+                attrs[ATTR_RECENT_MARKS_MARKDOWN] = "\n".join(
+                    _format_mark_line(m) for m in recent_marks[:10]
+                )
+            else:
+                attrs[ATTR_RECENT_MARKS_MARKDOWN] = ""
         return attrs
 
     def _marks(self) -> list[dict[str, Any]]:
         if not self.coordinator.data:
             return []
         return self.coordinator.data.get("attendance", {}).get(self._student_id, [])
+
+    def _unexplained(self) -> list[dict[str, Any]]:
+        if not self.coordinator.data:
+            return []
+        return self.coordinator.data.get("unexplained_attendance", {}).get(self._student_id, [])
 
     def _unexplained(self) -> list[dict[str, Any]]:
         if not self.coordinator.data:
@@ -604,6 +655,9 @@ class WilmaLatestAttendanceSensor(WilmaBaseStudentSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         attrs = super().extra_state_attributes or {}
+        attrs[ATTR_WEB_URL] = (
+            f"{self.coordinator.server_url.rstrip('/')}/{self._student_id.lstrip('/')}/attendance/view"
+        )
         marks = self._marks()
         if marks:
             m = marks[0]
@@ -615,15 +669,24 @@ class WilmaLatestAttendanceSensor(WilmaBaseStudentSensor):
                 line += f": {m.get('subject_code')}"
             if m.get("mark_type"):
                 line += f" – {m.get('mark_type')}"
-            if m.get("teacher"):
+            if m.get("note"):
+                line += f" ({m.get('note')})"
+            elif m.get("teacher"):
                 line += f" ({m.get('teacher')})"
             attrs[ATTR_CONTENT_MARKDOWN] = line
+            is_recent = _is_recent_mark(m, 2) or m in self._unexplained()
+            attrs[ATTR_RECENT_MARKS_MARKDOWN] = line if is_recent else ""
         return attrs
 
     def _marks(self) -> list[dict[str, Any]]:
         if not self.coordinator.data:
             return []
         return self.coordinator.data.get("attendance", {}).get(self._student_id, [])
+
+    def _unexplained(self) -> list[dict[str, Any]]:
+        if not self.coordinator.data:
+            return []
+        return self.coordinator.data.get("unexplained_attendance", {}).get(self._student_id, [])
 
 
 class WilmaNextExamSensor(WilmaBaseStudentSensor):
@@ -656,6 +719,8 @@ class WilmaNextExamSensor(WilmaBaseStudentSensor):
                 "info": exam.get("info"),
                 "teachers": exam.get("teachers"),
             })
+            if exam.get("web_url"):
+                attrs[ATTR_WEB_URL] = exam["web_url"]
         attrs["exam_count"] = len(upcoming)
         attrs["exams"] = [
             {
@@ -853,6 +918,7 @@ class WilmaSummarySensor(CoordinatorEntity, SensorEntity):
                 ATTR_LAST_ERROR: record.get("last_error"),
                 ATTR_LAST_ERROR_AT: record.get("last_error_at"),
                 ATTR_ERROR_COUNT: record.get("error_count", 0),
+                ATTR_WEB_URL: record.get("web_url"),
                 "history": record.get("history", []),
             }
         )

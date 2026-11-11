@@ -26,6 +26,8 @@ DEFAULT_RECENT_THRESHOLD_HOURS = 24
 
 ATTR_CONTENT = "content"
 ATTR_CONTENT_MARKDOWN = "content_markdown"
+ATTR_RECENT_MARKS_MARKDOWN = "recent_marks_markdown"
+ATTR_WEB_URL = "web_url"
 ATTR_SENDER = "sender"
 ATTR_SUBJECT = "subject"
 ATTR_TIMESTAMP = "timestamp"

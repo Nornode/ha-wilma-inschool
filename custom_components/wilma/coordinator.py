@@ -421,10 +421,14 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 msg_dict["content_markdown"] = message.content_markdown
             except ValueError:
                 pass
+        path = f"{student_id.lstrip('/')}/messages/{message.id}" if student_id else f"messages/{message.id}"
+        msg_dict["web_url"] = f"{self.server_url.rstrip('/')}/{path}"
         return msg_dict
 
     @staticmethod
-    def _parse_news_html(html: str, student_id: str, student_name: str) -> list[dict[str, Any]]:
+    def _parse_news_html(
+        html: str, student_id: str, student_name: str, server_url: str = ""
+    ) -> list[dict[str, Any]]:
         """Parse the Wilma news page into serializable bulletin dicts."""
         soup = BeautifulSoup(html, "html.parser")
         items: list[dict[str, Any]] = []
@@ -444,6 +448,9 @@ class WilmaCoordinator(DataUpdateCoordinator):
             if not title:
                 continue
 
+            path = f"{student_id.lstrip('/')}/news/{news_id}" if student_id else f"news/{news_id}"
+            web_url = f"{server_url.rstrip('/')}/{path}" if server_url else f"/{path}"
+
             items.append(
                 {
                     "news_id": int(news_id),
@@ -451,6 +458,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
                     "date": current_section,
                     "section": current_section,
                     "url": f"{student_id.rstrip('/')}/news/{news_id}",
+                    "web_url": web_url,
                     "student_id": student_id,
                     "student_name": student_name,
                 }
@@ -477,6 +485,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
             session = await self.client._ensure_session()
             headers = {"Wilma2SID": self.client._sid or ""}
             full_url = f"{self.server_url.rstrip('/')}/{str(url).lstrip('/')}"
+            item["web_url"] = full_url
             async with session.get(self._url_with_lang(full_url), headers=headers) as resp:
                 self.last_http_status = resp.status
                 if resp.status != 200:
@@ -713,7 +722,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 ),
                 self.username,
             )
-            return self._parse_news_html(html, student_id, student_name)
+            return self._parse_news_html(html, student_id, student_name, self.server_url)
         except UpdateFailed:
             raise
         except Exception as err:
@@ -727,6 +736,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
     def _merge_messages(
         existing_messages: list[dict[str, Any]],
         fetched_messages: list[dict[str, Any]],
+        server_url: str = "",
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Merge message lists and deduplicate by message id."""
         existing_by_id = {
@@ -741,6 +751,12 @@ class WilmaCoordinator(DataUpdateCoordinator):
             if message_id is None:
                 continue
             existing_by_id[message_id] = message
+
+        for msg in existing_by_id.values():
+            if server_url and not msg.get("web_url") and msg.get("id"):
+                sid = msg.get("student_id", "")
+                path = f"{sid.lstrip('/')}/messages/{msg['id']}" if sid else f"messages/{msg['id']}"
+                msg["web_url"] = f"{server_url.rstrip('/')}/{path}"
 
         merged = sorted(
             existing_by_id.values(),
@@ -1000,7 +1016,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
 
     @staticmethod
     def _parse_exams_html(
-        html: str, student_id: str, student_name: str
+        html: str, student_id: str, student_name: str, server_url: str = ""
     ) -> list[dict[str, Any]]:
         """Parse upcoming exams from /exams/calendar.
 
@@ -1011,6 +1027,8 @@ class WilmaCoordinator(DataUpdateCoordinator):
         soup = BeautifulSoup(html, "html.parser")
         container = soup.find("main") or soup
         exams: list[dict[str, Any]] = []
+        path = f"{student_id.lstrip('/')}/exams/calendar" if student_id else "exams/calendar"
+        web_url = f"{server_url.rstrip('/')}/{path}" if server_url else f"/{path}"
         for table in container.select("table"):
             rows = table.find_all("tr")
             if not rows:
@@ -1076,6 +1094,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 "details": details,
                 "student_id": student_id,
                 "student_name": student_name,
+                "web_url": web_url,
             })
 
         exams.sort(key=lambda e: (e["date"], e["subject"]))
@@ -1111,7 +1130,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
             if exams_heading:
                 self.ui_labels["exams"] = exams_heading
 
-            exams = self._parse_exams_html(html, student_id, student_name)
+            exams = self._parse_exams_html(html, student_id, student_name, self.server_url)
             _LOGGER.debug("Parsed %d exams for %s", len(exams), student_id)
             return exams
         except UpdateFailed:
@@ -1380,6 +1399,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 merged_messages, new_messages = self._merge_messages(
                     existing_messages,
                     fetched_messages,
+                    self.server_url,
                 )
                 updated_students[student_id] = merged_messages
 

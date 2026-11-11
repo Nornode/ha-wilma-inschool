@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 from homeassistant.const import STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_registry import async_get as get_entity_registry
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.wilma.const import (
@@ -232,3 +233,31 @@ async def test_attendance_sensor_content_markdown(
     assert latest_state is not None
     assert ATTR_CONTENT_MARKDOWN in latest_state.attributes
     assert "02.09.2024 Maanantai lektion 1: MA – Poissaolo (Opettaja)" in latest_state.attributes[ATTR_CONTENT_MARKDOWN]
+    assert count_state.attributes.get("web_url") == "https://test.inschool.fi/!STUDENT1/attendance/view"
+    assert latest_state.attributes.get("web_url") == "https://test.inschool.fi/!STUDENT1/attendance/view"
+    # An old mark from 2024 without unexplained status should not appear in recent_marks_markdown
+    assert count_state.attributes.get("recent_marks_markdown") == ""
+    assert latest_state.attributes.get("recent_marks_markdown") == ""
+
+    # Adding a today mark populates recent_marks_markdown
+    today_str = dt_util.now().date().strftime("%d.%m.%Y")
+    today_mark = {
+        "_id": f"{today_str}|2|EN",
+        "date": today_str,
+        "day": "Keskiviikko",
+        "lesson_hour": "2",
+        "subject_code": "EN",
+        "mark_type": "Myöhästyminen",
+        "teacher": "Teacher",
+        "note": "5 min late",
+    }
+    coordinator.data["attendance"]["!STUDENT1"] = [today_mark] + mock_marks
+    coordinator.async_set_updated_data(coordinator.data)
+    await hass.async_block_till_done()
+
+    count_state = hass.states.get(
+        _entity_id_for_unique_id(hass, f"{entry.entry_id}_!STUDENT1_attendance_count")
+    )
+    assert f"- {today_str} Keskiviikko lektion 2: EN – Myöhästyminen (5 min late)" in count_state.attributes["recent_marks_markdown"]
+    # The old 2024 mark should not be in recent_marks_markdown
+    assert "02.09.2024" not in count_state.attributes["recent_marks_markdown"]

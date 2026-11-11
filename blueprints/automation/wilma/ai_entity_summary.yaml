@@ -129,6 +129,15 @@ triggers:
     entity_id: !input source_entity
 
 actions:
+  # On HA restart, wait briefly so integration entities restore before checking status
+  - if:
+      - condition: template
+        value_template: "{{ trigger.platform == 'homeassistant' }}"
+    then:
+      - delay: "00:00:15"
+      - condition: template
+        value_template: "{{ states(source_entity) not in ['unavailable', 'unknown', ''] }}"
+
   # The integration composes the source text and decides whether a call is worth it.
   - action: wilma.summary_status
     data:
@@ -147,6 +156,7 @@ actions:
       source_id: >-
         {{ state_attr(source_entity, 'id') or state_attr(source_entity, 'news_id') or '' }}
       title: "{{ state_attr(source_entity, 'subject') or states(source_entity) }}"
+      web_url: "{{ status.web_url or state_attr(source_entity, 'web_url') or '' }}"
 
   - if:
       - condition: template
@@ -164,6 +174,7 @@ actions:
           source_attribute: "{{ source_attribute }}"
           source_id: "{{ source_id }}"
           source_text: "{{ source_text }}"
+          web_url: "{{ web_url }}"
           generated_by: passthrough
     else:
       - variables:
@@ -224,6 +235,7 @@ actions:
           source_attribute: "{{ source_attribute }}"
           source_id: "{{ source_id }}"
           source_text: "{{ source_text }}"
+          web_url: "{{ web_url }}"
           agent_id: "{{ agent_id }}"
           generated_by: agent
 
