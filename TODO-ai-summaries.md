@@ -75,3 +75,26 @@ Ordered by expected value.
       English.
 - [ ] **4.5 Repair issue** after N consecutive generation failures.
 - [ ] **4.6 Dashboard screenshot** in the README.
+
+### Phase 5 — Actionable Notifications & Anti-Storm Deduplication
+
+- [ ] **5.1 Restart storm mitigation.**
+      - Suppress summary regeneration during Home Assistant startup/uptime grace period (first 2-3 minutes).
+      - Audit `blueprints/automation/wilma/ai_entity_summary.yaml` trigger on `homeassistant.start`: only run if source entity is available and hash is actually different from stored hash.
+      - Ensure notifications only fire when the actual summary text (`plain_summary` or `summary`) changes, not merely on `generated_at` timestamp bumps or sensor restores.
+- [ ] **5.2 Sibling bulletin deduplication across multiple children.**
+      - School news bulletins are institutional; when multiple siblings attend the same school, each child's bulletin sensor currently triggers duplicate notifications for the same bulletin (e.g. EBUF activities).
+      - Add deduplication mechanism: track seen `news_id` per household / account within a 12-hour window or combine notification title to e.g. "Åt Clarissa & Castalia - <Titel>".
+- [ ] **5.3 Scoped attendance delta notifications (preventing full-history repeats).**
+      - Current attendance summary passes the entire cumulative school-year list of marks in `content_markdown`, causing the AI to repeatedly summarize old marks (from weeks/months ago) in every notification.
+      - Restrict notification/summary trigger to new marks only (delta from `wilma_new_attendance_mark` event or marks within the last 24-48 hours / unexplained marks).
+- [ ] **5.4 Actionable mobile notifications with deep links.**
+      - Expose direct canonical URLs (`web_url`) on message and bulletin entities:
+        - Messages: `https://<wilma_server>/messages/<message_id>`
+        - Bulletins: `https://<wilma_server>/news/<news_id>`
+      - Include actionable buttons in mobile app push notifications:
+        - **Action 1 ("Visa i Home Assistant")**: Deep link to HA dashboard (`/lovelace-parents/wilma` or student card) or toggle `input_boolean.wilma_<student>_show_full_<type>`.
+        - **Action 2 ("Öppna i Wilma")**: Open external Wilma web interface at the specific message/bulletin URL so parents can read full attachments and reply directly to teachers.
+- [ ] **5.5 Ready-made notification blueprint (`wilma_actionable_notifications.yaml`).**
+      - Provide an official blueprint that handles debounce, sibling deduplication, and actionable buttons out of the box.
+
