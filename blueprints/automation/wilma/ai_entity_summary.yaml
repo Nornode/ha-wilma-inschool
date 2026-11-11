@@ -52,7 +52,8 @@ blueprint:
         datum, tider och sådant som kräver en åtgärd av vårdnadshavaren. Svara i
         ren text utan markdown: inga rubriker (#), ingen fetstil (**), inga
         avdelare (---) och inga kodblock. Skriv korta stycken och använd vanliga
-        bindestreck (-) för listor. Inled inte med artighetsfraser.
+        bindestreck (-) för listor. Inled INTE med 'Här är en sammanfattning...',
+        'Här är...', eller andra artighetsfraser; gå direkt på sak.
       selector:
         text:
           multiline: true
@@ -68,7 +69,7 @@ blueprint:
         Använd korta stycken med en tom rad emellan.
         Listor skrivs med vanliga streck (-).
         Skriv datum i formatet "ons 19.11".
-        Börja direkt med informationen utan inledande hälsning eller förklarande ingress.
+        Börja direkt med informationen utan inledande hälsning, sammanfattningsfras ('Här är en sammanfattning...', 'Här är en kort sammanfattning...') eller förklarande ingress.
       selector:
         text:
           multiline: true
@@ -155,7 +156,17 @@ actions:
       source_text: "{{ status.source_text }}"
       source_id: >-
         {{ state_attr(source_entity, 'id') or state_attr(source_entity, 'news_id') or '' }}
-      title: "{{ state_attr(source_entity, 'subject') or states(source_entity) }}"
+      title: >-
+        {% set subj = state_attr(source_entity, 'subject') %}
+        {% if subj and subj != 'Läs hela notisen' %}
+          {{ subj }}
+        {% elif 'attendance' in source_entity %}
+          Lektionsanteckningar
+        {% elif state_attr(source_entity, 'friendly_name') %}
+          {{ state_attr(source_entity, 'friendly_name') }}
+        {% else %}
+          {{ states(source_entity) }}
+        {% endif %}
       web_url: "{{ status.web_url or state_attr(source_entity, 'web_url') or '' }}"
 
   - if:

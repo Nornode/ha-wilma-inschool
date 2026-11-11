@@ -3,8 +3,8 @@ blueprint:
   description: >-
     Dispatches rich push notifications to mobile devices when a Wilma summary sensor updates.
     Includes anti-storm protection against Home Assistant restart bursts, deduplicates school
-    bulletins across siblings, and attaches interactive action buttons to view in Home Assistant
-    or open directly in Wilma web.
+    bulletins across siblings with abbreviated recipient titles, and attaches interactive action
+    buttons to view in Home Assistant (FQDN / device setup fallback) or open directly in Wilma web.
   domain: automation
   input:
     summary_entities:
@@ -23,10 +23,22 @@ blueprint:
       selector:
         text: {}
 
+    ha_base_url:
+      name: Home Assistant Base URL
+      description: >-
+        Base URL used for Home Assistant action buttons (e.g. https://ha.lagus.net).
+        Prevents mobile companion apps from falling back to internal IP addresses.
+      default: https://ha.lagus.net
+      selector:
+        text: {}
+
     dashboard_path:
-      name: Home Assistant Dashboard Path
-      description: Deep link path opened by the "Visa i Home Assistant" button.
-      default: /lovelace-parents/wilma
+      name: Home Assistant Dashboard Path (Optional)
+      description: >-
+        Custom Lovelace dashboard path (e.g. /lovelace-home/wilma).
+        If left empty, the notification action automatically falls back to the student's
+        device setup page in Home Assistant.
+      default: ""
       selector:
         text: {}
 
@@ -56,6 +68,7 @@ mode: queued
 max: 10
 
 variables:
+  ha_base_url: !input ha_base_url
   dashboard_path: !input dashboard_path
   notify_service: !input notify_service
   uptime_guard_seconds: !input uptime_guard_seconds
@@ -107,7 +120,19 @@ actions:
   - variables:
       student_raw: "{{ state_attr(trigger.entity_id, 'student_name') | default('Student', true) }}"
       student: "{{ student_raw.split()[0] }}"
-      subject: "{{ state_attr(trigger.entity_id, 'title') | default(states(trigger.entity_id), true) }}"
+      raw_subj: "{{ state_attr(trigger.entity_id, 'title') }}"
+      is_bulletin: "{{ 'bulletin' in trigger.entity_id }}"
+      is_attendance: "{{ 'attendance' in trigger.entity_id }}"
+      subject: >-
+        {% if raw_subj and not (raw_subj | string).isdigit() and raw_subj != 'Läs hela notisen' %}
+          {{ raw_subj }}
+        {% elif is_attendance %}
+          Lektionsanteckning
+        {% elif is_bulletin %}
+          Anslagstavla
+        {% else %}
+          Meddelande
+        {% endif %}
       is_ai: "{{ state_attr(trigger.entity_id, 'generated_by') == 'agent' }}"
       raw_msg: >-
         {{
@@ -115,11 +140,9 @@ actions:
           | default(state_attr(trigger.entity_id, 'summary'), true)
           | default(states(trigger.entity_id), true)
         }}
-      is_bulletin: "{{ 'bulletin' in trigger.entity_id }}"
-      is_attendance: "{{ 'attendance' in trigger.entity_id }}"
       source_id: "{{ state_attr(trigger.entity_id, 'source_id') or '' }}"
       web_url: "{{ state_attr(trigger.entity_id, 'web_url') or '' }}"
-      channel: "Wilma {{ student }} Notes"
+      channel: "Wilma för {{ student }} - {{ 'Anslagstavla' if is_bulletin else 'Notifiering' }}"
       icon: >-
         {% if is_bulletin %}
           mdi:bullhorn
@@ -134,18 +157,60 @@ actions:
         {% else %}
           {{ trigger.entity_id }}
         {% endif %}
-      notification_title: >-
-        {% if is_bulletin and deduplicate_bulletins %}
-          Wilma Anslagstavla - {{ subject }}
+      recipient: >-
+        {% if is_bulletin %}
+          {% set ns = namespace(kids=[]) %}
+          {% set cur_source = state_attr(trigger.entity_id, 'source_id') | string %}
+          {% for s in integration_entities('wilma') if 'bulletin' in s and 'summary' in s %}
+            {% if cur_source != '' and state_attr(s, 'source_id') | string == cur_source %}
+              {% set k = (state_attr(s, 'student_name') or '').split()[0] %}
+              {% if k and k not in ns.kids %}
+                {% set ns.kids = ns.kids + [k] %}
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+          {% if ns.kids | length == 0 %}
+            {{ student }}
+          {% elif ns.kids | length == 1 %}
+            {{ ns.kids[0] }}
+          {% elif ns.kids | length == 2 %}
+            {{ ns.kids[0][:3] }} & {{ ns.kids[1][:3] }}
+          {% else %}
+            {{ (ns.kids[:-1] | map('truncate', 3, true, '') | join(', ')) }} & {{ ns.kids[-1][:3] }}
+          {% endif %}
         {% else %}
-          Åt {{ student }} - {{ subject }}
+          {{ student }}
+        {% endif %}
+      notification_title: >-
+        {% set ai_prefix = '🤖 ' if is_ai else '' %}
+        {% if is_bulletin %}
+          {{ ai_prefix }}Wilma för {{ recipient }} - Anslagstavla
+        {% elif is_attendance %}
+          {{ ai_prefix }}Wilma för {{ student }} - {{ subject }}
+        {% else %}
+          {{ ai_prefix }}Wilma för {{ student }} - {{ subject }}
+        {% endif %}
+      dev_id: "{{ device_id(trigger.entity_id) }}"
+      ha_target_path: >-
+        {% if dashboard_path != '' %}
+          {{ dashboard_path }}
+        {% elif dev_id %}
+          /config/devices/device/{{ dev_id }}
+        {% else %}
+          /config/integrations/integration/wilma
+        {% endif %}
+      ha_uri: >-
+        {% if ha_base_url != '' %}
+          {{ ha_base_url.rstrip('/') ~ ha_target_path }}
+        {% else %}
+          {{ ha_target_path }}
         {% endif %}
       notification_actions: >-
         {% set acts = [
           {
             "action": "URI",
             "title": "Visa i Home Assistant",
-            "uri": dashboard_path
+            "uri": ha_target_path
           }
         ] %}
         {% if web_url != '' %}
@@ -162,11 +227,13 @@ actions:
   - action: "{{ notify_service }}"
     data:
       title: "{{ notification_title }}"
-      message: "{% if is_ai %}🤖 AI-Sammanfattning:\n{% endif %}{{ raw_msg }}"
+      message: "{{ raw_msg }}"
       data:
         channel: "{{ channel }}"
         group: "{{ channel }}"
         notification_icon: "{{ icon }}"
         subject: "{{ subject }}"
         tag: "{{ tag }}"
+        clickAction: "{{ ha_target_path }}"
+        url: "{{ ha_target_path }}"
         actions: "{{ notification_actions }}"
