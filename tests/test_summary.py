@@ -360,3 +360,88 @@ async def test_consecutive_errors_are_counted(
     assert state.attributes["error_count"] == 0
     assert state.attributes["last_error"] is None
     assert state.attributes["summary"] == "recovered"
+
+
+def test_strip_markdown():
+    """Verify strip_markdown strips headers, bold, links, and rules."""
+    from custom_components.wilma.summary import strip_markdown
+
+    raw = """### **Det här har vi gjort**
+* **Matematik:** Lektion 1.
+* Se [länk](https://example.com) för mer info.
+
+---
+En rad till."""
+
+    stripped = strip_markdown(raw)
+    assert "###" not in stripped
+    assert "**" not in stripped
+    assert "---" not in stripped
+    assert "• Matematik: Lektion 1." in stripped
+    assert "länk (https://example.com)" in stripped
+    assert "Det här har vi gjort" in stripped
+
+
+async def test_store_summary_plain_summary_and_no_duplicate_bump(
+    hass: HomeAssistant, mock_setup_integration
+):
+    """Identical store calls do not bump generated_at and provide plain_summary."""
+    await mock_setup_integration()
+
+    await _store(
+        hass,
+        key="latest_message",
+        summary="### **Test Heading**\n* Point 1",
+        student="Kid One",
+        source_text="source text",
+    )
+
+    state = hass.states.get("sensor.wilma_kid_summary_latest_message")
+    gen_at_first = state.attributes["generated_at"]
+    assert state.attributes["plain_summary"] == "Test Heading\n• Point 1"
+
+    # Store identical summary and source_text
+    await _store(
+        hass,
+        key="latest_message",
+        summary="### **Test Heading**\n* Point 1",
+        student="Kid One",
+        source_text="source text",
+    )
+
+    state_after = hass.states.get("sensor.wilma_kid_summary_latest_message")
+    assert state_after.attributes["generated_at"] == gen_at_first
+
+
+async def test_status_reports_unchanged_for_existing_passthrough(
+    hass: HomeAssistant, mock_setup_integration
+):
+    """An already-stored passthrough source text returns unchanged."""
+    await mock_setup_integration()
+    hass.states.async_set("sensor.short_text", "Short text")
+
+    # Store it as passthrough first
+    await _store(
+        hass,
+        key="latest_message",
+        summary="Short text",
+        student="Kid One",
+        source_text="Short text",
+    )
+
+    resp = await hass.services.async_call(
+        DOMAIN,
+        "summary_status",
+        {
+            "key": "latest_message",
+            "source_entity": "sensor.short_text",
+            "student": "Kid One",
+            "min_length": 500,
+        },
+        blocking=True,
+        return_response=True,
+    )
+
+    assert resp["reason"] == "unchanged"
+    assert resp["needs_update"] is False
+    assert resp["call_agent"] is False

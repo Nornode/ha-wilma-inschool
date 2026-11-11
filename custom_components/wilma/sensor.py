@@ -38,6 +38,7 @@ from .const import (
     ATTR_NEWS_ID,
     ATTR_NEWS_SECTION,
     ATTR_NEWS_URL,
+    ATTR_PLAIN_SUMMARY,
     ATTR_PROMPT,
     ATTR_SENDER,
     ATTR_SOURCE_ATTRIBUTE,
@@ -548,6 +549,20 @@ class WilmaAttendanceCountSensor(WilmaBaseStudentSensor):
             by_type[t] = by_type.get(t, 0) + 1
         if by_type:
             attrs["by_type"] = by_type
+        if marks:
+            lines = []
+            for m in marks[:10]:
+                line = f"- {m.get('date', '')} {m.get('day', '')}".strip()
+                if m.get("lesson_hour"):
+                    line += f" lektion {m.get('lesson_hour')}"
+                if m.get("subject_code"):
+                    line += f": {m.get('subject_code')}"
+                if m.get("mark_type"):
+                    line += f" – {m.get('mark_type')}"
+                if m.get("teacher"):
+                    line += f" ({m.get('teacher')})"
+                lines.append(line)
+            attrs[ATTR_CONTENT_MARKDOWN] = "\n".join(lines)
         return attrs
 
     def _marks(self) -> list[dict[str, Any]]:
@@ -576,7 +591,18 @@ class WilmaLatestAttendanceSensor(WilmaBaseStudentSensor):
         attrs = super().extra_state_attributes or {}
         marks = self._marks()
         if marks:
-            attrs.update({k: v for k, v in marks[0].items() if not k.startswith("_")})
+            m = marks[0]
+            attrs.update({k: v for k, v in m.items() if not k.startswith("_")})
+            line = f"{m.get('date', '')} {m.get('day', '')}".strip()
+            if m.get("lesson_hour"):
+                line += f" lektion {m.get('lesson_hour')}"
+            if m.get("subject_code"):
+                line += f": {m.get('subject_code')}"
+            if m.get("mark_type"):
+                line += f" – {m.get('mark_type')}"
+            if m.get("teacher"):
+                line += f" ({m.get('teacher')})"
+            attrs[ATTR_CONTENT_MARKDOWN] = line
         return attrs
 
     def _marks(self) -> list[dict[str, Any]]:
@@ -740,6 +766,7 @@ class WilmaSummarySensor(CoordinatorEntity, SensorEntity):
         attrs.update(
             {
                 ATTR_SUMMARY: record.get("summary"),
+                ATTR_PLAIN_SUMMARY: record.get("plain_summary") or record.get("summary"),
                 ATTR_TITLE: record.get("title"),
                 ATTR_PROMPT: record.get("prompt"),
                 ATTR_INSTRUCTIONS: record.get("instructions"),

@@ -418,3 +418,40 @@ async def test_coordinator_auth_retry(hass, mock_wilma_client):
             await coordinator._async_update_data()
 
         mock_call_later.assert_called_once_with(hass, 60, coordinator._async_retry_refresh)
+
+
+def test_coordinator_merge_news_preserves_body():
+    """Test that _merge_news retains stored content_html and content_markdown."""
+    existing = [
+        {
+            "news_id": 1,
+            "title": "Old Title",
+            "content_html": "<p>Body</p>",
+            "content_markdown": "Body",
+            "fetched_at": "2026-11-10T10:00:00",
+        }
+    ]
+    fetched = [
+        {
+            "news_id": 1,
+            "title": "Old Title",
+            "date": "Tänään",
+            "section": "Tänään",
+            "url": "news/1",
+        }
+    ]
+
+    merged, new_items = WilmaCoordinator._merge_news(existing, fetched)
+    assert len(merged) == 1
+    assert merged[0]["content_html"] == "<p>Body</p>"
+    assert merged[0]["content_markdown"] == "Body"
+    assert merged[0]["fetched_at"] == "2026-11-10T10:00:00"
+    assert new_items == []
+
+
+def test_coordinator_unwrap_safelinks():
+    """Test Outlook SafeLinks unwrapper."""
+    raw = "Check [site](https://eur03.safelinks.protection.outlook.com/?url=https%3A%2F%2Fwww.ebuf.org%2Ftest&data=123) for details."
+    unwrapped = WilmaCoordinator._unwrap_safelinks(raw)
+    assert "https://www.ebuf.org/test" in unwrapped
+    assert "safelinks.protection.outlook.com" not in unwrapped

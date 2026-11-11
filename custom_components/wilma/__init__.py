@@ -404,7 +404,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
         if not source_text:
             reason = "no_source"
-        elif stored_hash and stored_hash == source_hash:
+        elif (stored_hash and stored_hash == source_hash) or (
+            record and record.get("summary") == source_text
+        ):
             reason = "unchanged"
         elif len(source_text) < min_length:
             reason = "too_short"

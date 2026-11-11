@@ -194,3 +194,41 @@ async def test_sensor_friendly_names_follow_integration_language(
     )
     assert state is not None
     assert state.state == "2"
+
+
+async def test_attendance_sensor_content_markdown(
+    hass: HomeAssistant, mock_setup_integration
+):
+    """Test attendance sensors expose formatted content_markdown."""
+    entry = await mock_setup_integration()
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    mock_marks = [
+        {
+            "_id": "02.09.2024|1|MA",
+            "date": "02.09.2024",
+            "day": "Maanantai",
+            "lesson_hour": "1",
+            "subject_code": "MA",
+            "mark_type": "Poissaolo",
+            "teacher": "Opettaja",
+        }
+    ]
+    coordinator.data.setdefault("attendance", {})["!STUDENT1"] = mock_marks
+    coordinator.async_set_updated_data(coordinator.data)
+    await hass.async_block_till_done()
+
+    # Check attendance count sensor
+    count_state = hass.states.get(
+        _entity_id_for_unique_id(hass, f"{entry.entry_id}_!STUDENT1_attendance_count")
+    )
+    assert count_state is not None
+    assert ATTR_CONTENT_MARKDOWN in count_state.attributes
+    assert "02.09.2024 Maanantai lektion 1: MA – Poissaolo (Opettaja)" in count_state.attributes[ATTR_CONTENT_MARKDOWN]
+
+    # Check latest attendance sensor
+    latest_state = hass.states.get(
+        _entity_id_for_unique_id(hass, f"{entry.entry_id}_!STUDENT1_latest_attendance")
+    )
+    assert latest_state is not None
+    assert ATTR_CONTENT_MARKDOWN in latest_state.attributes
+    assert "02.09.2024 Maanantai lektion 1: MA – Poissaolo (Opettaja)" in latest_state.attributes[ATTR_CONTENT_MARKDOWN]

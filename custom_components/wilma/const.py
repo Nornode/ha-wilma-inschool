@@ -38,6 +38,7 @@ ATTR_NEWS_SECTION = "section"
 ATTR_NEWS_URL = "url"
 
 ATTR_SUMMARY = "summary"
+ATTR_PLAIN_SUMMARY = "plain_summary"
 ATTR_SUMMARY_KEY = "key"
 ATTR_TITLE = "title"
 ATTR_PROMPT = "prompt"

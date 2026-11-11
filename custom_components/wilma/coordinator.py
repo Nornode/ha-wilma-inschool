@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import unicodedata
+import urllib.parse
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -354,13 +355,36 @@ class WilmaCoordinator(DataUpdateCoordinator):
             return (1, 0)
 
     @staticmethod
+    def _unwrap_safelinks(text: str) -> str:
+        """Unwrap Microsoft Outlook SafeLinks URLs to their original destinations."""
+        if not text or "safelinks.protection.outlook.com" not in text:
+            return text
+
+        pattern = r"https?://[a-zA-Z0-9\.\-]*safelinks\.protection\.outlook\.com/\?url=([^&\s\)]+)[^\s\)]*"
+
+        def _replace(match: re.Match) -> str:
+            raw_url = match.group(1)
+            try:
+                return urllib.parse.unquote(raw_url)
+            except Exception:
+                return match.group(0)
+
+        return re.sub(pattern, _replace, text)
+
+    @staticmethod
     def _html_to_markdown(html: str) -> str:
         """Convert HTML to markdown for notification-friendly output."""
         converter = html2text.HTML2Text()
         converter.ignore_links = False
         converter.ignore_images = True
         converter.body_width = 0
-        return converter.handle(html).strip()
+        md = converter.handle(html).strip()
+        md = WilmaCoordinator._unwrap_safelinks(md)
+        # Remove Wilma printable version link if present
+        md = re.sub(r"\[\s*Utskriftsvänlig version\s*\]\([^)]+\)", "", md, flags=re.IGNORECASE)
+        # Collapse excessive newlines
+        md = re.sub(r"\n{3,}", "\n\n", md)
+        return md.strip()
 
     def _message_to_dict(self, message: Message, student_id: str, student_name: str) -> dict[str, Any]:
         """Convert a Wilhelmina message object into a serializable dict."""
@@ -458,13 +482,54 @@ class WilmaCoordinator(DataUpdateCoordinator):
             self.client.user_id = original_user_id
 
         soup = BeautifulSoup(html, "html.parser")
+
+        # Decompose elements that are navigation, header, footer, cookies, or modal dialogues
+        for tag in soup.find_all(
+            ["nav", "header", "footer", "script", "style", "noscript", "iframe"]
+        ):
+            tag.decompose()
+        for tag in soup.find_all(
+            attrs={"role": ["navigation", "banner", "contentinfo", "dialog"]}
+        ):
+            tag.decompose()
+        for tag in soup.find_all(
+            class_=re.compile(
+                r"(navbar|nav-container|site-header|site-footer|sidebar|breadcrumb|cookie|modal)",
+                re.I,
+            )
+        ):
+            tag.decompose()
+        for tag in soup.find_all(
+            id=re.compile(
+                r"(navbar|site-header|site-footer|sidebar|breadcrumb|cookie|modal)",
+                re.I,
+            )
+        ):
+            tag.decompose()
+
         title = item.get("title") or ""
         heading = soup.find(["h1", "h2", "h3"])
         if heading and heading.get_text(" ", strip=True):
             title = heading.get_text(" ", strip=True)
 
-        content_root = soup.find("article") or soup.body or soup
-        content_html = content_root.decode_contents().strip() if hasattr(content_root, "decode_contents") else html.strip()
+        content_root = (
+            soup.find("article")
+            or soup.find("main")
+            or soup.find(attrs={"role": "main"})
+            or soup.find(id=re.compile(r"^(main-content|main|content)$", re.I))
+            or soup.find(class_=re.compile(r"(main-content|inner-content|news-content|article-content)", re.I))
+        )
+        if not content_root and heading:
+            content_root = heading.parent
+
+        if not content_root:
+            return item
+
+        content_html = (
+            content_root.decode_contents().strip()
+            if hasattr(content_root, "decode_contents")
+            else str(content_root).strip()
+        )
         content_markdown = self._html_to_markdown(content_html)
 
         item.update(
@@ -696,7 +761,14 @@ class WilmaCoordinator(DataUpdateCoordinator):
             news_id = item.get("news_id")
             if news_id is None:
                 continue
-            if news_id not in existing_ids and now_iso:
+            if news_id in existing_by_id:
+                prev = existing_by_id[news_id]
+                for key in ("content_html", "content_markdown", "fetched_at"):
+                    if prev.get(key) and not item.get(key):
+                        item[key] = prev[key]
+                if prev.get("title") and not item.get("title"):
+                    item["title"] = prev["title"]
+            elif now_iso:
                 item.setdefault("fetched_at", now_iso)
             existing_by_id[news_id] = item
 
@@ -998,10 +1070,12 @@ class WilmaCoordinator(DataUpdateCoordinator):
             h = {"Wilma2SID": self.client._sid or ""}
             base = self.server_url.rstrip("/")
             uid = student_id.lstrip("/")
-            year = dt_util.now().year
+            now = dt_util.now()
+            start_year = now.year if now.month >= 8 else now.year - 1
+            end_year = start_year + 1
 
-            # Full history view
-            view_url = f"{base}/{uid}/attendance/view?range=-3&first=01.01.{year}&last=31.12.{year}"
+            # Full history view for current school year (1 Aug - 31 Jul)
+            view_url = f"{base}/{uid}/attendance/view?range=-3&first=01.08.{start_year}&last=31.07.{end_year}"
             async with session.get(self._url_with_lang(view_url), headers=h) as resp:
                 self.last_http_status = resp.status
                 if resp.status != 200:
@@ -1129,13 +1203,17 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 new_bulletins_by_student[student_id] = new_news
 
                 if merged_news:
-                    merged_news[0] = await self._fetch_news_body(student_id, merged_news[0])
-
-                updated_news[student_id] = merged_news
+                    if not merged_news[0].get("content_markdown"):
+                        merged_news[0] = await self._fetch_news_body(student_id, merged_news[0])
 
                 if new_news and existing_news:
-                    for item in new_news:
+                    for i, item in enumerate(new_news):
                         item = await self._fetch_news_body(student_id, item)
+                        new_news[i] = item
+                        for j, m_item in enumerate(merged_news):
+                            if m_item.get("news_id") == item.get("news_id"):
+                                merged_news[j] = item
+                                break
                         pending_bulletin_events.append(
                             {
                                 "entry_id": self.entry_id,
@@ -1150,6 +1228,8 @@ class WilmaCoordinator(DataUpdateCoordinator):
                                 "content_markdown": item.get("content_markdown"),
                             }
                         )
+
+                updated_news[student_id] = merged_news
 
             # Fetch schedules for the current week and upcoming weeks for each student.
             today = dt_util.now().date()
@@ -1277,6 +1357,9 @@ class WilmaCoordinator(DataUpdateCoordinator):
             ]
             all_messages.sort(key=self._timestamp_sort_key, reverse=True)
 
+            # Reset retry delay on successful cycle
+            self._auth_retry_delay = 60
+
             return {
                 "students": updated_students,
                 "student_profiles": self.student_profiles,
@@ -1303,11 +1386,25 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 )
                 raise UpdateFailed("Authentication rejected by Wilma server (HTTP 403)") from err
 
-            _LOGGER.error("Authentication to Wilma failed: %s", err)
+            err_str = str(err)
+            is_transient = any(code in err_str for code in ("502", "503", "504"))
+            retry_delay = getattr(self, "_auth_retry_delay", 60)
+
+            if is_transient:
+                _LOGGER.warning(
+                    "Authentication to Wilma failed (server unavailable: %s). Retrying in %ds",
+                    err,
+                    retry_delay,
+                )
+                self._auth_retry_delay = min(retry_delay * 2, 300)
+            else:
+                _LOGGER.error("Authentication to Wilma failed: %s", err)
+                self._auth_retry_delay = 60
+
             if self._retry_cancel:
                 self._retry_cancel()
             self._retry_cancel = async_call_later(
-                self.hass, 60, self._async_retry_refresh
+                self.hass, retry_delay, self._async_retry_refresh
             )
             raise UpdateFailed("Authentication failed") from err
         except WilmaError as err:

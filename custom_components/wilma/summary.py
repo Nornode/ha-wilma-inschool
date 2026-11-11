@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -30,6 +31,39 @@ def source_fingerprint(text: str | None) -> str | None:
     if not text:
         return None
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def strip_markdown(text: str | None) -> str:
+    """Convert markdown formatted text into clean plain text for notification displays."""
+    if not text:
+        return ""
+    t = text
+    # Remove code blocks
+    t = re.sub(r"```[a-zA-Z]*\n?(.*?)```", r"\1", t, flags=re.DOTALL)
+    # Remove inline code
+    t = re.sub(r"`([^`\n]+)`", r"\1", t)
+    # Remove horizontal rules
+    t = re.sub(r"^[ \t]*[-*_]{3,}[ \t]*$", "", t, flags=re.MULTILINE)
+    # Remove headers: e.g. '### Title' -> 'Title'
+    t = re.sub(r"^[ \t]*#{1,6}[ \t]+", "", t, flags=re.MULTILINE)
+    # Convert markdown links [text](url) -> text (url) or text
+    t = re.sub(
+        r"\[([^\]\n]+)\]\(([^)\n]+)\)",
+        lambda m: m.group(1) if m.group(2).startswith(("#", "/")) else f"{m.group(1)} ({m.group(2)})",
+        t,
+    )
+    # Normalize bullet markers: '  * item' -> '  • item'
+    t = re.sub(r"^([ \t]*)[*+-][ \t]+", r"\1• ", t, flags=re.MULTILINE)
+    # Remove bold/italic on inline spans without crossing newlines
+    t = re.sub(r"\*\*\*([^*\n]+)\*\*\*", r"\1", t)
+    t = re.sub(r"\*\*([^*\n]+)\*\*", r"\1", t)
+    t = re.sub(r"\*([^*\n]+)\*", r"\1", t)
+    t = re.sub(r"___([^_\n]+)___", r"\1", t)
+    t = re.sub(r"__([^_\n]+)__", r"\1", t)
+    t = re.sub(r"_([^_\n]+)_", r"\1", t)
+    # Collapse multiple blank lines
+    t = re.sub(r"\n{3,}", "\n\n", t)
+    return t.strip()
 
 
 def compose_source_text(
@@ -83,6 +117,11 @@ class WilmaSummaryStore:
         raw = await self._store.async_load() or {}
         students = raw.get("students")
         self._data = students if isinstance(students, dict) else {}
+        for student_entries in self._data.values():
+            if isinstance(student_entries, dict):
+                for rec in student_entries.values():
+                    if isinstance(rec, dict) and "plain_summary" not in rec:
+                        rec["plain_summary"] = strip_markdown(rec.get("summary") or "")
 
     async def _async_save(self) -> None:
         await self._store.async_save({"students": self._data})
@@ -121,19 +160,35 @@ class WilmaSummaryStore:
         previous = entries.get(key)
         is_new = previous is None
 
+        new_source_hash = source_fingerprint(source_text)
+        new_source_length = len(source_text) if source_text else 0
+        plain = strip_markdown(summary)
+
+        # If summary and source_hash are identical to previous record, do not bump generated_at or record duplicate history
+        if (
+            previous
+            and previous.get("summary") == summary
+            and previous.get("source_hash") == new_source_hash
+        ):
+            previous["plain_summary"] = plain
+            if title is not None:
+                previous["title"] = title
+            return previous
+
         record: dict[str, Any] = {
             "key": key,
             "student_id": student_id,
             "student_name": student_name,
             "summary": summary,
+            "plain_summary": plain,
             "title": title,
             "prompt": prompt,
             "instructions": instructions,
             "source_entity": source_entity,
             "source_attribute": source_attribute,
             "source_id": source_id,
-            "source_hash": source_fingerprint(source_text),
-            "source_length": len(source_text) if source_text else 0,
+            "source_hash": new_source_hash,
+            "source_length": new_source_length,
             "agent_id": agent_id,
             "generated_by": generated_by,
             "generated_at": dt_util.utcnow().isoformat(),

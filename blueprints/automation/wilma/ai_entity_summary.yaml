@@ -48,9 +48,27 @@ blueprint:
         Free-text prompt sent before the source text. There is no storage
         limit on the reply, so ask for whatever length and shape you want.
       default: >-
-        Sammanfatta texten på lätt svenska i naturligt flytande språk, lätt
-        uppställt för att läsa på en skärm. Lyft fram datum, tider och sådant
-        som kräver en åtgärd av vårdnadshavaren.
+        Sammanfatta texten på lätt svenska i naturligt flytande språk. Lyft fram
+        datum, tider och sådant som kräver en åtgärd av vårdnadshavaren. Svara i
+        ren text utan markdown: inga rubriker (#), ingen fetstil (**), inga
+        avdelare (---) och inga kodblock. Skriv korta stycken och använd vanliga
+        bindestreck (-) för listor. Inled inte med artighetsfraser.
+      selector:
+        text:
+          multiline: true
+
+    format_rules:
+      name: Output formatting rules
+      description: >-
+        Formatting instructions to ensure clear readability on phones without markdown glitches.
+      default: >-
+        VIKTIGT OM FORMATET:
+        Svara ENDAST med ren oformaterad text.
+        Använd INTE markdown: inga rubriker (#), ingen fetstil (**), ingen kursiv stil (*), inga tabeller och inga horisontella linjer (---).
+        Använd korta stycken med en tom rad emellan.
+        Listor skrivs med vanliga streck (-).
+        Skriv datum i formatet "ons 19.11".
+        Börja direkt med informationen utan inledande hälsning eller förklarande ingress.
       selector:
         text:
           multiline: true
@@ -97,6 +115,7 @@ variables:
   summary_key: !input summary_key
   student: !input student
   instructions: !input instructions
+  format_rules: !input format_rules
   language: !input language
   agent_id: !input agent_id
   min_length: !input min_length
@@ -150,6 +169,8 @@ actions:
       - variables:
           prompt_text: >-
             {{ instructions }}
+
+            {{ format_rules }}
 
             Källtext:
 
