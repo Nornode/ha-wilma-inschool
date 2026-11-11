@@ -638,3 +638,44 @@ async def test_schedule_fetch_gives_up_after_one_retry(hass):
     assert events == []
     fresh.login.assert_awaited_once()
 
+
+def test_parse_news_html_extracts_real_title_instead_of_read_more():
+    """Verify that 'Läs hela notisen' or 'Lue koko tiedote' link anchors are replaced by container heading."""
+    html = """
+    <div class="panel">
+        <div class="margin-bottom well">
+            <h3>Aktuellt på EBUF</h3>
+            <span class="horizontal-link-container small">
+                <a href="/!04302772/news/32832">Läs hela notisen</a>
+            </span>
+        </div>
+    </div>
+    """
+    items = WilmaCoordinator._parse_news_html(
+        html, "!04302772", "Castalia", server_url="https://espoo.inschool.fi", language=2
+    )
+    assert len(items) == 1
+    assert items[0]["news_id"] == 32832
+    assert items[0]["title"] == "Aktuellt på EBUF"
+    assert items[0]["web_url"] == "https://espoo.inschool.fi/!04302772/news/32832?langid=2"
+
+
+def test_merge_news_recovers_title_from_generic_read_more():
+    """Verify that existing news with 'Läs hela notisen' recover their actual headline from markdown/date."""
+    existing = [
+        {
+            "news_id": 32832,
+            "title": "Läs hela notisen",
+            "date": "Aktuellt på EBUF",
+            "content_markdown": "## Aktuellt på EBUF\nHär kommer information...",
+            "web_url": "https://espoo.inschool.fi/!04302772/news/32832",
+        }
+    ]
+    merged, new = WilmaCoordinator._merge_news(
+        existing, [], server_url="https://espoo.inschool.fi", language=2
+    )
+    assert len(merged) == 1
+    assert merged[0]["title"] == "Aktuellt på EBUF"
+    assert merged[0]["web_url"] == "https://espoo.inschool.fi/!04302772/news/32832?langid=2"
+
+

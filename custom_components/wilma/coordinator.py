@@ -111,7 +111,11 @@ class WilmaCoordinator(DataUpdateCoordinator):
         return int(self.options.get(CONF_LANGUAGE, DEFAULT_LANGUAGE))
 
     def _url_with_lang(self, url: str) -> str:
-        """Append ?langid= (or &langid=) to a Wilma URL."""
+        """Append ?langid= (or &langid=) to a Wilma URL if not already present."""
+        if not url:
+            return url
+        if "langid=" in url:
+            return url
         sep = "&" if "?" in url else "?"
         return f"{url}{sep}langid={self.language}"
 
@@ -422,17 +426,26 @@ class WilmaCoordinator(DataUpdateCoordinator):
             except ValueError:
                 pass
         path = f"{student_id.lstrip('/')}/messages/{message.id}" if student_id else f"messages/{message.id}"
-        msg_dict["web_url"] = f"{self.server_url.rstrip('/')}/{path}"
+        msg_dict["web_url"] = self._url_with_lang(f"{self.server_url.rstrip('/')}/{path}")
         return msg_dict
 
     @staticmethod
     def _parse_news_html(
-        html: str, student_id: str, student_name: str, server_url: str = ""
+        html: str,
+        student_id: str,
+        student_name: str,
+        server_url: str = "",
+        language: int | None = None,
     ) -> list[dict[str, Any]]:
         """Parse the Wilma news page into serializable bulletin dicts."""
         soup = BeautifulSoup(html, "html.parser")
         items: list[dict[str, Any]] = []
         current_section = ""
+        read_more_re = re.compile(
+            r"^(läs\s+hela|lue\s+koko|read\s+more|mer\s+information|näytä\s+lisää|visa\s+mer)",
+            re.I,
+        )
+
         for element in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "a"]):
             if element.name in {"h1", "h2", "h3", "h4", "h5", "h6"}:
                 current_section = element.get_text(" ", strip=True)
@@ -448,8 +461,26 @@ class WilmaCoordinator(DataUpdateCoordinator):
             if not title:
                 continue
 
+            # If anchor text is a generic "Läs hela notisen" / "Read more", locate the container heading
+            if read_more_re.search(title):
+                container = element.find_parent(["div", "article", "section", "li", "td"])
+                cand_heading = None
+                if container:
+                    cand_heading = container.find(["h1", "h2", "h3", "h4", "h5", "h6"])
+                if cand_heading and cand_heading.get_text(strip=True):
+                    cand_text = cand_heading.get_text(" ", strip=True)
+                    if not read_more_re.search(cand_text):
+                        title = cand_text
+                elif current_section and not read_more_re.search(current_section):
+                    title = current_section
+
             path = f"{student_id.lstrip('/')}/news/{news_id}" if student_id else f"news/{news_id}"
-            web_url = f"{server_url.rstrip('/')}/{path}" if server_url else f"/{path}"
+            raw_url = f"{server_url.rstrip('/')}/{path}" if server_url else f"/{path}"
+            if language is not None and "langid=" not in raw_url:
+                sep = "&" if "?" in raw_url else "?"
+                web_url = f"{raw_url}{sep}langid={language}"
+            else:
+                web_url = raw_url
 
             items.append(
                 {
@@ -466,7 +497,12 @@ class WilmaCoordinator(DataUpdateCoordinator):
 
         deduped: dict[int, dict[str, Any]] = {}
         for item in items:
-            deduped[item["news_id"]] = item
+            nid = item["news_id"]
+            if nid in deduped:
+                # If existing title is non-generic and new title is generic, keep existing
+                if read_more_re.search(item["title"]) and not read_more_re.search(deduped[nid]["title"]):
+                    continue
+            deduped[nid] = item
         return sorted(deduped.values(), key=WilmaCoordinator._news_sort_key)
 
     async def _fetch_news_body(self, student_id: str, news_item: dict[str, Any]) -> dict[str, Any]:
@@ -485,7 +521,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
             session = await self.client._ensure_session()
             headers = {"Wilma2SID": self.client._sid or ""}
             full_url = f"{self.server_url.rstrip('/')}/{str(url).lstrip('/')}"
-            item["web_url"] = full_url
+            item["web_url"] = self._url_with_lang(full_url)
             async with session.get(self._url_with_lang(full_url), headers=headers) as resp:
                 self.last_http_status = resp.status
                 if resp.status != 200:
@@ -527,10 +563,16 @@ class WilmaCoordinator(DataUpdateCoordinator):
         ):
             tag.decompose()
 
+        read_more_re = re.compile(
+            r"^(läs\s+hela|lue\s+koko|read\s+more|mer\s+information|näytä\s+lisää|visa\s+mer)",
+            re.I,
+        )
         title = item.get("title") or ""
         heading = soup.find(["h1", "h2", "h3"])
         if heading and heading.get_text(" ", strip=True):
-            title = heading.get_text(" ", strip=True)
+            cand = heading.get_text(" ", strip=True)
+            if not read_more_re.search(cand):
+                title = cand
 
         content_root = (
             soup.find("article")
@@ -722,7 +764,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 ),
                 self.username,
             )
-            return self._parse_news_html(html, student_id, student_name, self.server_url)
+            return self._parse_news_html(html, student_id, student_name, self.server_url, self.language)
         except UpdateFailed:
             raise
         except Exception as err:
@@ -737,6 +779,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
         existing_messages: list[dict[str, Any]],
         fetched_messages: list[dict[str, Any]],
         server_url: str = "",
+        language: int | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Merge message lists and deduplicate by message id."""
         existing_by_id = {
@@ -756,7 +799,9 @@ class WilmaCoordinator(DataUpdateCoordinator):
             if server_url and not msg.get("web_url") and msg.get("id"):
                 sid = msg.get("student_id", "")
                 path = f"{sid.lstrip('/')}/messages/{msg['id']}" if sid else f"messages/{msg['id']}"
-                msg["web_url"] = f"{server_url.rstrip('/')}/{path}"
+                raw = f"{server_url.rstrip('/')}/{path}"
+                sep = "&" if "?" in raw else "?"
+                msg["web_url"] = f"{raw}{sep}langid={language}" if (language and "langid=" not in raw) else raw
 
         merged = sorted(
             existing_by_id.values(),
@@ -775,6 +820,8 @@ class WilmaCoordinator(DataUpdateCoordinator):
         existing_news: list[dict[str, Any]],
         fetched_news: list[dict[str, Any]],
         now_iso: str | None = None,
+        server_url: str = "",
+        language: int | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Merge bulletin lists and deduplicate by news id."""
         existing_by_id = {
@@ -783,6 +830,10 @@ class WilmaCoordinator(DataUpdateCoordinator):
             if "news_id" in item
         }
         existing_ids = set(existing_by_id)
+        read_more_re = re.compile(
+            r"^(läs\s+hela|lue\s+koko|read\s+more|mer\s+information|näytä\s+lisää|visa\s+mer)",
+            re.I,
+        )
 
         for item in fetched_news:
             news_id = item.get("news_id")
@@ -793,11 +844,35 @@ class WilmaCoordinator(DataUpdateCoordinator):
                 for key in ("content_html", "content_markdown", "fetched_at"):
                     if prev.get(key) and not item.get(key):
                         item[key] = prev[key]
-                if prev.get("title") and not item.get("title"):
+                if prev.get("title") and not read_more_re.search(prev["title"]) and (not item.get("title") or read_more_re.search(item.get("title", ""))):
+                    item["title"] = prev["title"]
+                elif prev.get("title") and not item.get("title"):
                     item["title"] = prev["title"]
             elif now_iso:
                 item.setdefault("fetched_at", now_iso)
             existing_by_id[news_id] = item
+
+        for item in existing_by_id.values():
+            # If title is generic "Läs hela notisen", attempt recovery from heading/date/section
+            if not item.get("title") or read_more_re.search(item["title"]):
+                md = item.get("content_markdown") or ""
+                m = re.search(r"^##?\s+(.+)$", md, re.MULTILINE)
+                if m and not read_more_re.search(m.group(1).strip()):
+                    item["title"] = m.group(1).strip()
+                elif item.get("date") and not read_more_re.search(item["date"]):
+                    item["title"] = item["date"]
+                elif item.get("section") and not read_more_re.search(item["section"]):
+                    item["title"] = item["section"]
+
+            if server_url and not item.get("web_url") and item.get("news_id"):
+                sid = item.get("student_id", "")
+                path = f"{sid.lstrip('/')}/news/{item['news_id']}" if sid else f"news/{item['news_id']}"
+                raw = f"{server_url.rstrip('/')}/{path}"
+                sep = "&" if "?" in raw else "?"
+                item["web_url"] = f"{raw}{sep}langid={language}" if (language and "langid=" not in raw) else raw
+            elif language and item.get("web_url") and "langid=" not in item["web_url"]:
+                sep = "&" if "?" in item["web_url"] else "?"
+                item["web_url"] = f"{item['web_url']}{sep}langid={language}"
 
         merged = sorted(existing_by_id.values(), key=WilmaCoordinator._news_sort_key, reverse=True)
         new_items = [item for item in fetched_news if item.get("news_id") not in existing_ids]
@@ -1016,7 +1091,11 @@ class WilmaCoordinator(DataUpdateCoordinator):
 
     @staticmethod
     def _parse_exams_html(
-        html: str, student_id: str, student_name: str, server_url: str = ""
+        html: str,
+        student_id: str,
+        student_name: str,
+        server_url: str = "",
+        language: int | None = None,
     ) -> list[dict[str, Any]]:
         """Parse upcoming exams from /exams/calendar.
 
@@ -1028,7 +1107,12 @@ class WilmaCoordinator(DataUpdateCoordinator):
         container = soup.find("main") or soup
         exams: list[dict[str, Any]] = []
         path = f"{student_id.lstrip('/')}/exams/calendar" if student_id else "exams/calendar"
-        web_url = f"{server_url.rstrip('/')}/{path}" if server_url else f"/{path}"
+        raw_url = f"{server_url.rstrip('/')}/{path}" if server_url else f"/{path}"
+        if language is not None and "langid=" not in raw_url:
+            sep = "&" if "?" in raw_url else "?"
+            web_url = f"{raw_url}{sep}langid={language}"
+        else:
+            web_url = raw_url
         for table in container.select("table"):
             rows = table.find_all("tr")
             if not rows:
@@ -1130,7 +1214,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
             if exams_heading:
                 self.ui_labels["exams"] = exams_heading
 
-            exams = self._parse_exams_html(html, student_id, student_name, self.server_url)
+            exams = self._parse_exams_html(html, student_id, student_name, self.server_url, self.language)
             _LOGGER.debug("Parsed %d exams for %s", len(exams), student_id)
             return exams
         except UpdateFailed:
@@ -1400,6 +1484,7 @@ class WilmaCoordinator(DataUpdateCoordinator):
                     existing_messages,
                     fetched_messages,
                     self.server_url,
+                    self.language,
                 )
                 updated_students[student_id] = merged_messages
 
@@ -1422,7 +1507,13 @@ class WilmaCoordinator(DataUpdateCoordinator):
                         )
 
                 fetched_news = await self._fetch_news_for_student(student_id)
-                merged_news, new_news = self._merge_news(existing_news, fetched_news, dt_util.utcnow().isoformat())
+                merged_news, new_news = self._merge_news(
+                    existing_news,
+                    fetched_news,
+                    dt_util.utcnow().isoformat(),
+                    self.server_url,
+                    self.language,
+                )
                 new_bulletins_by_student[student_id] = new_news
 
                 if merged_news:

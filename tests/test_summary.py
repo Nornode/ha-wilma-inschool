@@ -470,7 +470,7 @@ async def test_summary_stores_and_exposes_web_url(
         blocking=True,
         return_response=True,
     )
-    assert resp["web_url"] == "https://test.inschool.fi/!STUDENT1/messages/123"
+    assert resp["web_url"] == "https://test.inschool.fi/!STUDENT1/messages/123?langid=1"
 
     await _store(
         hass,
@@ -483,7 +483,7 @@ async def test_summary_stores_and_exposes_web_url(
     )
 
     state = hass.states.get("sensor.wilma_kid_summary_latest_message")
-    assert state.attributes.get("web_url") == "https://test.inschool.fi/!STUDENT1/messages/123"
+    assert state.attributes.get("web_url") == "https://test.inschool.fi/!STUDENT1/messages/123?langid=1"
 
     # Status check with same source_id recognizes unchanged
     resp_again = await hass.services.async_call(

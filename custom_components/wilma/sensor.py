@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from datetime import date, datetime, time as dt_time
 from typing import Any, Dict, Optional
@@ -72,6 +73,11 @@ from .coordinator import WilmaCoordinator
 from .summary import compose_source_text, source_fingerprint
 
 _LOGGER = logging.getLogger(__name__)
+
+READ_MORE_RE = re.compile(
+    r"^(läs\s+hela|lue\s+koko|read\s+more|mer\s+information|näytä\s+lisää|visa\s+mer)",
+    re.I,
+)
 
 SENSOR_DESCRIPTIONS = [
     SensorEntityDescription(
@@ -392,7 +398,7 @@ class WilmaLatestMessageSensor(WilmaBaseStudentSensor):
             )
             web_url = f"{self.coordinator.server_url.rstrip('/')}/{path}"
         if web_url:
-            attrs[ATTR_WEB_URL] = web_url
+            attrs[ATTR_WEB_URL] = self.coordinator._url_with_lang(web_url)
 
         return attrs
 
@@ -417,7 +423,15 @@ class WilmaLatestBulletinSensor(WilmaBaseStudentSensor):
             return None
 
         item = self.coordinator.data.get("latest_bulletin_by_student", {}).get(self._student_id)
-        return item.get("title") if item else None
+        if not item:
+            return None
+        title = item.get("title")
+        if title and not READ_MORE_RE.search(title):
+            return title
+        sec = item.get("section") or item.get("date")
+        if sec and not READ_MORE_RE.search(sec):
+            return sec
+        return title
 
     @property
     def extra_state_attributes(self) -> Optional[Dict[str, Any]]:
@@ -429,10 +443,16 @@ class WilmaLatestBulletinSensor(WilmaBaseStudentSensor):
         if not item:
             return attrs
 
+        title = item.get("title")
+        if not title or READ_MORE_RE.search(title):
+            sec = item.get("section") or item.get("date")
+            if sec and not READ_MORE_RE.search(sec):
+                title = sec
+
         attrs.update(
             {
                 ATTR_NEWS_ID: item.get("news_id"),
-                ATTR_SUBJECT: item.get("title"),
+                ATTR_SUBJECT: title,
                 ATTR_NEWS_DATE: item.get("date"),
                 ATTR_NEWS_SECTION: item.get("section"),
                 ATTR_NEWS_URL: item.get("url"),
@@ -442,7 +462,7 @@ class WilmaLatestBulletinSensor(WilmaBaseStudentSensor):
         if item.get("content_markdown"):
             attrs[ATTR_CONTENT_MARKDOWN] = item.get("content_markdown")
         if item.get("web_url"):
-            attrs[ATTR_WEB_URL] = item.get("web_url")
+            attrs[ATTR_WEB_URL] = self.coordinator._url_with_lang(item.get("web_url"))
         return attrs
 
 
@@ -599,7 +619,7 @@ class WilmaAttendanceCountSensor(WilmaBaseStudentSensor):
         marks = self._marks()
         unexplained = self._unexplained()
         attrs["unexplained_count"] = len(unexplained)
-        attrs[ATTR_WEB_URL] = (
+        attrs[ATTR_WEB_URL] = self.coordinator._url_with_lang(
             f"{self.coordinator.server_url.rstrip('/')}/{self._student_id.lstrip('/')}/attendance/view"
         )
         # Count by mark type
@@ -655,7 +675,7 @@ class WilmaLatestAttendanceSensor(WilmaBaseStudentSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         attrs = super().extra_state_attributes or {}
-        attrs[ATTR_WEB_URL] = (
+        attrs[ATTR_WEB_URL] = self.coordinator._url_with_lang(
             f"{self.coordinator.server_url.rstrip('/')}/{self._student_id.lstrip('/')}/attendance/view"
         )
         marks = self._marks()
@@ -720,7 +740,7 @@ class WilmaNextExamSensor(WilmaBaseStudentSensor):
                 "teachers": exam.get("teachers"),
             })
             if exam.get("web_url"):
-                attrs[ATTR_WEB_URL] = exam["web_url"]
+                attrs[ATTR_WEB_URL] = self.coordinator._url_with_lang(exam["web_url"])
         attrs["exam_count"] = len(upcoming)
         attrs["exams"] = [
             {
@@ -918,7 +938,11 @@ class WilmaSummarySensor(CoordinatorEntity, SensorEntity):
                 ATTR_LAST_ERROR: record.get("last_error"),
                 ATTR_LAST_ERROR_AT: record.get("last_error_at"),
                 ATTR_ERROR_COUNT: record.get("error_count", 0),
-                ATTR_WEB_URL: record.get("web_url"),
+                ATTR_WEB_URL: (
+                    self.coordinator._url_with_lang(record["web_url"])
+                    if record.get("web_url")
+                    else None
+                ),
                 "history": record.get("history", []),
             }
         )

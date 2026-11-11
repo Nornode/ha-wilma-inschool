@@ -233,8 +233,8 @@ async def test_attendance_sensor_content_markdown(
     assert latest_state is not None
     assert ATTR_CONTENT_MARKDOWN in latest_state.attributes
     assert "02.09.2024 Maanantai lektion 1: MA – Poissaolo (Opettaja)" in latest_state.attributes[ATTR_CONTENT_MARKDOWN]
-    assert count_state.attributes.get("web_url") == "https://test.inschool.fi/!STUDENT1/attendance/view"
-    assert latest_state.attributes.get("web_url") == "https://test.inschool.fi/!STUDENT1/attendance/view"
+    assert count_state.attributes.get("web_url") == "https://test.inschool.fi/!STUDENT1/attendance/view?langid=1"
+    assert latest_state.attributes.get("web_url") == "https://test.inschool.fi/!STUDENT1/attendance/view?langid=1"
     # An old mark from 2024 without unexplained status should not appear in recent_marks_markdown
     assert count_state.attributes.get("recent_marks_markdown") == ""
     assert latest_state.attributes.get("recent_marks_markdown") == ""
