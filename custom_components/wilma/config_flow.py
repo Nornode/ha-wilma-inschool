@@ -9,7 +9,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import selector
-from wilhelmina import AuthenticationError, WilmaClient, WilmaError
+from wilhelmina import AuthenticationError, WilmaError
+
+from .client import ResilientWilmaClient as WilmaClient
 
 from .const import (
     CONF_LANGUAGE,
@@ -36,6 +38,14 @@ def _is_server_auth_rejection(err: AuthenticationError) -> bool:
     err_text = str(err).lower()
     return "403" in err_text and "token" in err_text
 
+
+def _normalize_server_url(url: str) -> str:
+    """Normalize a Wilma server URL, defaulting to https:// if no scheme is given."""
+    cleaned = url.strip().rstrip("/")
+    if cleaned and not cleaned.startswith(("http://", "https://")):
+        cleaned = f"https://{cleaned}"
+    return cleaned
+
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_SERVER_URL): str,
@@ -59,8 +69,9 @@ async def validate_input(hass: HomeAssistant, data: Dict[str, Any]) -> Dict[str,
 
     Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
     """
+    server_url = _normalize_server_url(data[CONF_SERVER_URL])
     try:
-        async with WilmaClient(data[CONF_SERVER_URL]) as client:
+        async with WilmaClient(server_url) as client:
             await client.login(data[CONF_USERNAME], data[CONF_PASSWORD])
 
             # Test fetching messages
@@ -110,7 +121,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 info = await validate_input(self.hass, user_input)
                 entry_data = {
-                    CONF_SERVER_URL: user_input[CONF_SERVER_URL],
+                    CONF_SERVER_URL: _normalize_server_url(user_input[CONF_SERVER_URL]),
                     CONF_USERNAME: user_input[CONF_USERNAME],
                     CONF_PASSWORD: user_input[CONF_PASSWORD],
                 }

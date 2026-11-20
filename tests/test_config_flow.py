@@ -146,3 +146,30 @@ async def test_options_flow(hass, mock_config_entry):
     assert result["data"]["scan_interval_minutes"] == 10
     assert result["data"]["only_unread"] is True
     assert result["data"]["no_message_content_fetch_limit"] is True
+
+
+async def test_form_normalizes_server_url_without_scheme(hass):
+    """Test server URL without https:// is normalized before connecting and saving."""
+    client = MagicMock()
+    client.login = AsyncMock()
+    client.get_messages = AsyncMock(return_value=[])
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("custom_components.wilma.config_flow.WilmaClient", return_value=client) as mock_cls:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_SERVER_URL: "vihti.inschool.fi/",
+                CONF_USERNAME: "testuser",
+                CONF_PASSWORD: "testpass",
+                CONF_LANGUAGE: DEFAULT_LANGUAGE,
+            },
+        )
+
+    mock_cls.assert_called_once_with("https://vihti.inschool.fi")
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_SERVER_URL] == "https://vihti.inschool.fi"

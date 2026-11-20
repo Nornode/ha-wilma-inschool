@@ -17,7 +17,9 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
-from wilhelmina import AuthenticationError, Message, Sender, WilmaClient, WilmaError
+from wilhelmina import AuthenticationError, Message, Sender, WilmaError
+
+from .client import ResilientWilmaClient as WilmaClient
 
 from .const import (
     CONF_LANGUAGE,
