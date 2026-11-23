@@ -148,7 +148,7 @@ async def test_options_flow(hass, mock_config_entry):
     assert result["data"]["no_message_content_fetch_limit"] is True
 
 
-async def test_form_normalizes_server_url_without_scheme(hass):
+async def test_form_normalizes_server_url_without_scheme(hass, mock_wilma_client):
     """Test server URL without https:// is normalized before connecting and saving."""
     client = MagicMock()
     client.login = AsyncMock()
